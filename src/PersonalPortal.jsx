@@ -16,7 +16,7 @@ const COLORS = {
   hairline: "rgba(200, 212, 192, 0.08)",
 };
 
-const API_URL = process.env.REACT_APP_API_URL || "http://localhost:3001";
+const API_URL = import.meta.env.VITE_API_URL || "https://fofa-xi.vercel.app/api";
 
 // ============================================================================
 // PERSONAL PORTAL

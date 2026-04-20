@@ -3,22 +3,5 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "framework": "vite",
-  "outputDirectory": "dist",
-  "env": {
-    "JWT_SECRET": "@jwt_secret",
-    "VITE_API_URL": "@vite_api_url"
-  },
-  "functions": {
-    "api/**/*.js": {
-      "memory": 1024,
-      "maxDuration": 60,
-      "runtime": "nodejs20.x"
-    }
-  },
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/server.js"
-    }
-  ]
+  "outputDirectory": "dist"
 }

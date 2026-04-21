@@ -1,29 +1,21 @@
 {
   "name": "fofa-site",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "compile": "npx hardhat compile --config hardhat.config.cjs",
-    "deploy:local": "npx hardhat run scripts/deploy.cjs --network localhost --config hardhat.config.cjs",
-    "node": "npx hardhat node --config hardhat.config.cjs"
+    "preview": "vite preview"
   },
   "dependencies": {
-    "bcryptjs": "^2.4.3",
-    "cors": "^2.8.5",
-    "ethers": "^6.13.0",
-    "express": "^4.21.0",
-    "jsonwebtoken": "^9.0.2",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "jsonwebtoken": "^9.0.0",
+    "bcryptjs": "^2.4.3"
   },
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
     "@vitejs/plugin-react": "^4.3.4",
-    "hardhat": "^2.22.0",
     "vite": "^5.4.10"
   }
 }

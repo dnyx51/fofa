@@ -1,0 +1,1976 @@
+import React, { useEffect, useRef, useState } from "react";
+
+// ============================================================================
+// FOFA PERSONAL PORTAL - POLISHED EDITION
+// ============================================================================
+
+const COLORS = {
+  bg: "#080C08",
+  bgSoft: "#0E140E",
+  bgCard: "#0A1109",
+  green: "#1AFF6E",
+  greenDeep: "#0D8F3C",
+  greenGlow: "rgba(26, 255, 110, 0.15)",
+  body: "#C8D4C0",
+  gold: "#C8A84B",
+  teal: "#1AC8C8",
+  red: "#FF4757",
+  hairline: "rgba(200, 212, 192, 0.08)",
+  hairlineStrong: "rgba(200, 212, 192, 0.15)",
+};
+
+const API_URL = import.meta.env.VITE_API_URL || "https://fofa-xi.vercel.app/api";
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
+export default function PersonalPortal() {
+  const [currentView, setCurrentView] = useState("landing");
+  const [token, setToken] = useState(localStorage.getItem("fofaToken") || null);
+  const [user, setUser] = useState(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    if (token) {
+      fetchUserProfile();
+    } else {
+      setInitialLoading(false);
+      setCurrentView("landing");
+    }
+  }, []);
+
+  function showToast(message, type = "success") {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  async function fetchUserProfile() {
+    try {
+      const response = await fetch(`${API_URL}/user/profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error("Session expired");
+      const data = await response.json();
+      setUser(data.user);
+      setCurrentView("portal");
+    } catch (err) {
+      console.error(err);
+      logout();
+      showToast("Session expired. Please log in again.", "error");
+    } finally {
+      setInitialLoading(false);
+    }
+  }
+
+  function logout() {
+    setToken(null);
+    setUser(null);
+    localStorage.removeItem("fofaToken");
+    setCurrentView("landing");
+    showToast("Signed out successfully", "success");
+  }
+
+  function handleAuthSuccess(newToken, newUser, message) {
+    setToken(newToken);
+    localStorage.setItem("fofaToken", newToken);
+    setUser(newUser);
+    setCurrentView("portal");
+    showToast(message, "success");
+  }
+
+  // Initial loading screen
+  if (initialLoading) {
+    return (
+      <div style={{
+        background: COLORS.bg,
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "column",
+        gap: 24,
+      }}>
+        <GlobalStyles />
+        <div style={{
+          fontSize: 48,
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontWeight: 900,
+          color: COLORS.green,
+          letterSpacing: "0.05em",
+          animation: "pulse 2s ease-in-out infinite",
+        }}>
+          FOFA
+        </div>
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      background: COLORS.bg,
+      color: COLORS.body,
+      fontFamily: "'Crimson Pro', Georgia, serif",
+      minHeight: "100vh",
+      position: "relative",
+    }}>
+      <GlobalStyles />
+      
+      {/* Ambient background effect */}
+      <div style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: `radial-gradient(circle at 20% 30%, ${COLORS.greenGlow} 0%, transparent 50%), radial-gradient(circle at 80% 70%, rgba(26, 200, 200, 0.05) 0%, transparent 50%)`,
+        pointerEvents: "none",
+        zIndex: 0,
+      }} />
+
+      {/* Toast notifications */}
+      {toast && <Toast message={toast.message} type={toast.type} />}
+
+      {/* Header */}
+      <Header token={token} onLogout={logout} />
+
+      {/* Main content */}
+      <div style={{ position: "relative", zIndex: 1, padding: "0 20px 80px" }}>
+        {currentView === "landing" && (
+          <LandingView setCurrentView={setCurrentView} />
+        )}
+        {currentView === "login" && (
+          <AuthForm
+            type="login"
+            onSuccess={(token, user) => handleAuthSuccess(token, user, `Welcome back, ${user.display_name}! ⚽`)}
+            onError={(msg) => showToast(msg, "error")}
+            onSwitchView={() => setCurrentView("register")}
+          />
+        )}
+        {currentView === "register" && (
+          <AuthForm
+            type="register"
+            onSuccess={(token, user) => handleAuthSuccess(token, user, `Welcome to FOFA, ${user.display_name}! 🎉`)}
+            onError={(msg) => showToast(msg, "error")}
+            onSwitchView={() => setCurrentView("login")}
+          />
+        )}
+        {currentView === "portal" && user && (
+          <Dashboard
+            user={user}
+            token={token}
+            onProfileUpdate={fetchUserProfile}
+            showToast={showToast}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// GLOBAL STYLES
+// ============================================================================
+
+function GlobalStyles() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;700;900&family=Crimson+Pro:ital,wght@0,300;0,400;0,500;1,400&family=DM+Mono:wght@400;500&display=swap');
+      
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+      
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      @keyframes slideInUp {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      @keyframes slideInRight {
+        from { opacity: 0; transform: translateX(30px); }
+        to { opacity: 1; transform: translateX(0); }
+      }
+      
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+      
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      
+      @keyframes shimmer {
+        0% { background-position: -1000px 0; }
+        100% { background-position: 1000px 0; }
+      }
+      
+      @keyframes slideInDown {
+        from { opacity: 0; transform: translateY(-20px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      .fade-in { animation: fadeIn 0.4s ease-out forwards; }
+      .slide-up { animation: slideInUp 0.5s ease-out forwards; }
+      .slide-right { animation: slideInRight 0.4s ease-out forwards; }
+      
+      input, textarea, select {
+        font-family: 'Crimson Pro', Georgia, serif;
+        background: ${COLORS.bgSoft};
+        border: 1px solid ${COLORS.hairline};
+        color: ${COLORS.body};
+        padding: 14px 16px;
+        border-radius: 4px;
+        font-size: 16px;
+        transition: all 0.2s ease;
+        width: 100%;
+      }
+      
+      input:focus, textarea:focus, select:focus {
+        outline: none;
+        border-color: ${COLORS.green};
+        box-shadow: 0 0 0 3px ${COLORS.greenGlow};
+        background: ${COLORS.bgCard};
+      }
+      
+      input:hover:not(:focus):not(:disabled),
+      textarea:hover:not(:focus):not(:disabled),
+      select:hover:not(:focus):not(:disabled) {
+        border-color: ${COLORS.hairlineStrong};
+      }
+      
+      input.error, textarea.error {
+        border-color: ${COLORS.red};
+        box-shadow: 0 0 0 3px rgba(255, 71, 87, 0.1);
+      }
+      
+      input.success, textarea.success {
+        border-color: ${COLORS.green};
+      }
+      
+      button {
+        font-family: 'DM Mono', monospace;
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        padding: 14px 28px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-weight: 500;
+        position: relative;
+        overflow: hidden;
+      }
+      
+      button:active:not(:disabled) {
+        transform: scale(0.97);
+      }
+      
+      .btn-primary {
+        background: ${COLORS.green};
+        color: ${COLORS.bg};
+        font-weight: 700;
+      }
+      
+      .btn-primary:hover:not(:disabled) {
+        background: #2dff82;
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px ${COLORS.greenGlow};
+      }
+      
+      .btn-primary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      
+      .btn-ghost {
+        background: transparent;
+        border: 1px solid ${COLORS.green};
+        color: ${COLORS.green};
+      }
+      
+      .btn-ghost:hover:not(:disabled) {
+        background: ${COLORS.greenGlow};
+        transform: translateY(-1px);
+      }
+      
+      .btn-danger {
+        background: transparent;
+        border: 1px solid ${COLORS.red};
+        color: ${COLORS.red};
+      }
+      
+      .btn-danger:hover:not(:disabled) {
+        background: rgba(255, 71, 87, 0.1);
+      }
+      
+      .btn-text {
+        background: none;
+        border: none;
+        color: ${COLORS.green};
+        padding: 8px 0;
+      }
+      
+      .btn-text:hover {
+        color: #2dff82;
+      }
+      
+      /* Mobile responsive */
+      @media (max-width: 768px) {
+        h1 { font-size: clamp(32px, 10vw, 48px) !important; }
+        h2 { font-size: clamp(24px, 7vw, 32px) !important; }
+        .grid-responsive {
+          grid-template-columns: 1fr !important;
+        }
+        .dashboard-header {
+          flex-direction: column !important;
+          text-align: center !important;
+        }
+        .dashboard-avatar {
+          margin: 0 auto !important;
+        }
+        .tabs-container {
+          overflow-x: auto !important;
+          -webkit-overflow-scrolling: touch !important;
+          scrollbar-width: none !important;
+        }
+        .tabs-container::-webkit-scrollbar {
+          display: none !important;
+        }
+      }
+      
+      /* Scrollbar styling */
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: ${COLORS.bg}; }
+      ::-webkit-scrollbar-thumb { background: ${COLORS.hairlineStrong}; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: ${COLORS.green}; }
+      
+      /* Skeleton loading */
+      .skeleton {
+        background: linear-gradient(90deg, ${COLORS.bgSoft} 0%, ${COLORS.bgCard} 50%, ${COLORS.bgSoft} 100%);
+        background-size: 1000px 100%;
+        animation: shimmer 2s infinite linear;
+        border-radius: 4px;
+      }
+    `}</style>
+  );
+}
+
+// ============================================================================
+// TOAST NOTIFICATION
+// ============================================================================
+
+function Toast({ message, type }) {
+  const colors = {
+    success: { bg: COLORS.greenGlow, border: COLORS.green, text: COLORS.green },
+    error: { bg: "rgba(255, 71, 87, 0.15)", border: COLORS.red, text: "#FF9AAD" },
+    info: { bg: "rgba(26, 200, 200, 0.15)", border: COLORS.teal, text: COLORS.teal },
+  };
+  const c = colors[type] || colors.info;
+
+  return (
+    <div style={{
+      position: "fixed",
+      top: 24,
+      right: 24,
+      zIndex: 1000,
+      background: COLORS.bgCard,
+      border: `1px solid ${c.border}`,
+      borderLeft: `4px solid ${c.border}`,
+      color: c.text,
+      padding: "16px 24px",
+      borderRadius: 4,
+      minWidth: 280,
+      maxWidth: "calc(100vw - 48px)",
+      boxShadow: "0 16px 48px rgba(0, 0, 0, 0.4)",
+      animation: "slideInRight 0.3s ease-out forwards",
+      fontFamily: "'DM Mono', monospace",
+      fontSize: 13,
+      letterSpacing: "0.03em",
+    }}>
+      {message}
+    </div>
+  );
+}
+
+// ============================================================================
+// LOADING SPINNER
+// ============================================================================
+
+function LoadingSpinner({ size = 24, color = COLORS.green }) {
+  return (
+    <div style={{
+      width: size,
+      height: size,
+      border: `2px solid ${COLORS.hairline}`,
+      borderTopColor: color,
+      borderRadius: "50%",
+      animation: "spin 0.8s linear infinite",
+      display: "inline-block",
+    }} />
+  );
+}
+
+// ============================================================================
+// SKELETON LOADER
+// ============================================================================
+
+function Skeleton({ width = "100%", height = 20, style = {} }) {
+  return (
+    <div
+      className="skeleton"
+      style={{ width, height, ...style }}
+    />
+  );
+}
+
+// ============================================================================
+// HEADER
+// ============================================================================
+
+function Header({ token, onLogout }) {
+  return (
+    <div style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: "20px 24px",
+      borderBottom: `1px solid ${COLORS.hairline}`,
+      position: "relative",
+      zIndex: 10,
+      backdropFilter: "blur(10px)",
+    }}>
+      <a href="/" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{
+          fontSize: 24,
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontWeight: 900,
+          color: COLORS.green,
+          letterSpacing: "0.05em",
+        }}>
+          FOFA
+        </div>
+        <div style={{
+          fontSize: 10,
+          fontFamily: "'DM Mono', monospace",
+          color: COLORS.body,
+          opacity: 0.5,
+          letterSpacing: "0.15em",
+          borderLeft: `1px solid ${COLORS.hairline}`,
+          paddingLeft: 12,
+        }}>
+          PASSPORT
+        </div>
+      </a>
+      
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <a href="/" style={{
+          color: COLORS.body,
+          opacity: 0.7,
+          textDecoration: "none",
+          fontSize: 12,
+          fontFamily: "'DM Mono', monospace",
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+          transition: "opacity 0.2s",
+        }}
+          onMouseEnter={e => e.target.style.opacity = "1"}
+          onMouseLeave={e => e.target.style.opacity = "0.7"}
+        >
+          ← Back to Site
+        </a>
+        {token && (
+          <button className="btn-ghost" onClick={onLogout}>
+            Logout
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// LANDING VIEW
+// ============================================================================
+
+function LandingView({ setCurrentView }) {
+  return (
+    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "60px 0" }}>
+      <div style={{ textAlign: "center", marginBottom: 80 }} className="slide-up">
+        <div style={{
+          fontSize: 12,
+          fontFamily: "'DM Mono', monospace",
+          color: COLORS.gold,
+          letterSpacing: "0.2em",
+          marginBottom: 24,
+          opacity: 0,
+          animation: "fadeIn 0.6s ease-out 0.1s forwards",
+        }}>
+          — YOUR DIGITAL IDENTITY
+        </div>
+        
+        <h1 style={{
+          fontSize: "clamp(42px, 8vw, 96px)",
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontWeight: 900,
+          margin: "0 0 24px",
+          color: "#F2F5EE",
+          lineHeight: 0.95,
+          letterSpacing: "-0.02em",
+          opacity: 0,
+          animation: "fadeIn 0.8s ease-out 0.2s forwards",
+        }}>
+          Your Personal<br/>
+          <span style={{ color: COLORS.green }}>Passport</span>
+        </h1>
+        
+        <p style={{
+          fontSize: "clamp(16px, 2vw, 20px)",
+          color: COLORS.body,
+          marginBottom: 48,
+          maxWidth: 600,
+          margin: "0 auto 48px",
+          lineHeight: 1.6,
+          opacity: 0,
+          animation: "fadeIn 0.8s ease-out 0.4s forwards",
+        }}>
+          Join the FOFA ecosystem. Prove your loyalty.<br/>
+          Unlock your status as a true fan.
+        </p>
+        
+        <div style={{
+          display: "flex",
+          gap: 16,
+          justifyContent: "center",
+          flexWrap: "wrap",
+          opacity: 0,
+          animation: "fadeIn 0.8s ease-out 0.6s forwards",
+        }}>
+          <button className="btn-primary" onClick={() => setCurrentView("register")}>
+            Create Account
+          </button>
+          <button className="btn-ghost" onClick={() => setCurrentView("login")}>
+            Already a member?
+          </button>
+        </div>
+      </div>
+
+      {/* Feature Cards */}
+      <div className="grid-responsive" style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+        gap: 24,
+        marginTop: 100,
+      }}>
+        {[
+          {
+            title: "Proof of Loyalty",
+            description: "Score across 6 dimensions: engagement, passion, knowledge, consistency, community, and growth.",
+            icon: "⚽",
+            delay: 0.8,
+          },
+          {
+            title: "Fan Levels",
+            description: "From Apprentice to Legend. Track your journey and unlock exclusive benefits as you rise.",
+            icon: "🏆",
+            delay: 1.0,
+          },
+          {
+            title: "Club Partnerships",
+            description: "Connected with clubs worldwide. Your loyalty data travels with you across the ecosystem.",
+            icon: "🌍",
+            delay: 1.2,
+          },
+        ].map((card, i) => (
+          <div
+            key={i}
+            style={{
+              background: COLORS.bgSoft,
+              border: `1px solid ${COLORS.hairline}`,
+              padding: 32,
+              borderRadius: 4,
+              textAlign: "center",
+              transition: "all 0.3s ease",
+              cursor: "default",
+              opacity: 0,
+              animation: `fadeIn 0.6s ease-out ${card.delay}s forwards`,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = "translateY(-4px)";
+              e.currentTarget.style.borderColor = COLORS.green;
+              e.currentTarget.style.boxShadow = `0 16px 48px ${COLORS.greenGlow}`;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "translateY(0)";
+              e.currentTarget.style.borderColor = COLORS.hairline;
+              e.currentTarget.style.boxShadow = "none";
+            }}
+          >
+            <div style={{ fontSize: 56, marginBottom: 20 }}>{card.icon}</div>
+            <h3 style={{
+              color: "#F2F5EE",
+              marginBottom: 12,
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontSize: 24,
+              fontWeight: 700,
+              letterSpacing: "0.02em",
+            }}>
+              {card.title}
+            </h3>
+            <p style={{
+              color: COLORS.body,
+              opacity: 0.75,
+              lineHeight: 1.6,
+              fontSize: 15,
+            }}>
+              {card.description}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// AUTH FORM (LOGIN / REGISTER)
+// ============================================================================
+
+function AuthForm({ type, onSuccess, onError, onSwitchView }) {
+  const [formData, setFormData] = useState({
+    email: "",
+    password: "",
+    username: "",
+    display_name: "",
+    favorite_club: "",
+  });
+  const [errors, setErrors] = useState({});
+  const [touched, setTouched] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Validation
+  function validate(field, value) {
+    const newErrors = { ...errors };
+    
+    if (field === "email" || (field === "all" && type === "login")) {
+      const val = field === "all" ? formData.email : value;
+      if (!val) newErrors.email = "Email is required";
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) newErrors.email = "Invalid email format";
+      else delete newErrors.email;
+    }
+    
+    if (field === "password" || field === "all") {
+      const val = field === "all" ? formData.password : value;
+      if (!val) newErrors.password = "Password is required";
+      else if (type === "register" && val.length < 6) newErrors.password = "Minimum 6 characters";
+      else delete newErrors.password;
+    }
+    
+    if (type === "register") {
+      if (field === "username" || field === "all") {
+        const val = field === "all" ? formData.username : value;
+        if (!val) newErrors.username = "Username is required";
+        else if (val.length < 3) newErrors.username = "Minimum 3 characters";
+        else if (!/^[a-zA-Z0-9_]+$/.test(val)) newErrors.username = "Letters, numbers, underscores only";
+        else delete newErrors.username;
+      }
+      
+      if (field === "display_name" || field === "all") {
+        const val = field === "all" ? formData.display_name : value;
+        if (!val) newErrors.display_name = "Display name is required";
+        else delete newErrors.display_name;
+      }
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  }
+
+  function handleChange(field, value) {
+    setFormData({ ...formData, [field]: value });
+    if (touched[field]) {
+      validate(field, value);
+    }
+  }
+
+  function handleBlur(field) {
+    setTouched({ ...touched, [field]: true });
+    validate(field, formData[field]);
+  }
+
+  // Password strength
+  function getPasswordStrength(password) {
+    if (!password) return { level: 0, label: "" };
+    let score = 0;
+    if (password.length >= 6) score++;
+    if (password.length >= 10) score++;
+    if (/[A-Z]/.test(password)) score++;
+    if (/[0-9]/.test(password)) score++;
+    if (/[^A-Za-z0-9]/.test(password)) score++;
+    
+    const levels = [
+      { level: 1, label: "Weak", color: COLORS.red },
+      { level: 2, label: "Fair", color: "#FF9F43" },
+      { level: 3, label: "Good", color: COLORS.gold },
+      { level: 4, label: "Strong", color: COLORS.green },
+      { level: 5, label: "Excellent", color: COLORS.green },
+    ];
+    return levels[Math.min(score - 1, 4)] || levels[0];
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    
+    // Mark all as touched
+    const allTouched = {};
+    Object.keys(formData).forEach(k => { allTouched[k] = true; });
+    setTouched(allTouched);
+    
+    if (!validate("all")) {
+      onError("Please fix the errors above");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const endpoint = type === "login" ? "/auth/login" : "/auth/register";
+      const body = type === "login"
+        ? { email: formData.email, password: formData.password }
+        : formData;
+
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Something went wrong");
+      }
+
+      onSuccess(data.token, data.user);
+    } catch (err) {
+      let message = err.message;
+      if (message.includes("already exists")) {
+        message = "This email or username is already taken. Try logging in instead?";
+      } else if (message.includes("Invalid")) {
+        message = "Incorrect email or password. Please try again.";
+      }
+      onError(message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const passwordStrength = type === "register" ? getPasswordStrength(formData.password) : null;
+
+  return (
+    <div style={{ maxWidth: 460, margin: "0 auto", padding: "40px 0" }} className="slide-up">
+      <div style={{ textAlign: "center", marginBottom: 40 }}>
+        <div style={{
+          fontSize: 11,
+          fontFamily: "'DM Mono', monospace",
+          color: COLORS.gold,
+          letterSpacing: "0.25em",
+          marginBottom: 16,
+        }}>
+          — {type === "login" ? "WELCOME BACK" : "JOIN THE ECOSYSTEM"}
+        </div>
+        <h2 style={{
+          color: "#F2F5EE",
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontSize: "clamp(36px, 7vw, 56px)",
+          fontWeight: 900,
+          margin: 0,
+          letterSpacing: "-0.02em",
+        }}>
+          {type === "login" ? "Sign In" : <>Join <span style={{color: COLORS.green}}>FOFA</span></>}
+        </h2>
+      </div>
+
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {type === "register" && (
+          <>
+            <FormField
+              label="Display Name"
+              name="display_name"
+              value={formData.display_name}
+              onChange={(v) => handleChange("display_name", v)}
+              onBlur={() => handleBlur("display_name")}
+              error={touched.display_name && errors.display_name}
+              placeholder="Your name"
+              autoFocus
+            />
+            
+            <FormField
+              label="Username"
+              name="username"
+              value={formData.username}
+              onChange={(v) => handleChange("username", v.toLowerCase())}
+              onBlur={() => handleBlur("username")}
+              error={touched.username && errors.username}
+              placeholder="footy_fan_2024"
+              hint="Letters, numbers, and underscores only"
+            />
+            
+            <FormField
+              label="Favorite Club"
+              name="favorite_club"
+              value={formData.favorite_club}
+              onChange={(v) => handleChange("favorite_club", v)}
+              placeholder="Manchester United"
+              hint="Optional"
+            />
+          </>
+        )}
+
+        <FormField
+          label="Email"
+          type="email"
+          name="email"
+          value={formData.email}
+          onChange={(v) => handleChange("email", v)}
+          onBlur={() => handleBlur("email")}
+          error={touched.email && errors.email}
+          placeholder="you@example.com"
+          autoFocus={type === "login"}
+        />
+
+        <div>
+          <FormField
+            label="Password"
+            type={showPassword ? "text" : "password"}
+            name="password"
+            value={formData.password}
+            onChange={(v) => handleChange("password", v)}
+            onBlur={() => handleBlur("password")}
+            error={touched.password && errors.password}
+            placeholder="••••••••"
+            suffix={
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: COLORS.body,
+                  opacity: 0.6,
+                  cursor: "pointer",
+                  padding: 8,
+                  fontSize: 12,
+                }}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            }
+          />
+          
+          {/* Password strength indicator */}
+          {type === "register" && formData.password && (
+            <div style={{ marginTop: 8, opacity: 0, animation: "fadeIn 0.3s forwards" }}>
+              <div style={{
+                display: "flex",
+                gap: 4,
+                marginBottom: 6,
+              }}>
+                {[1, 2, 3, 4].map(i => (
+                  <div key={i} style={{
+                    flex: 1,
+                    height: 3,
+                    background: passwordStrength.level >= i ? passwordStrength.color : COLORS.hairline,
+                    borderRadius: 2,
+                    transition: "background 0.3s",
+                  }} />
+                ))}
+              </div>
+              <div style={{
+                fontSize: 11,
+                fontFamily: "'DM Mono', monospace",
+                color: passwordStrength.color,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+              }}>
+                {passwordStrength.label}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <button
+          type="submit"
+          className="btn-primary"
+          disabled={loading}
+          style={{
+            width: "100%",
+            padding: "16px",
+            marginTop: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+          }}
+        >
+          {loading ? (
+            <>
+              <LoadingSpinner size={16} color={COLORS.bg} />
+              <span>{type === "login" ? "Signing in..." : "Creating account..."}</span>
+            </>
+          ) : (
+            type === "login" ? "Sign In" : "Create Account"
+          )}
+        </button>
+      </form>
+
+      <div style={{ textAlign: "center", marginTop: 32, paddingTop: 24, borderTop: `1px solid ${COLORS.hairline}` }}>
+        <button className="btn-text" onClick={onSwitchView}>
+          {type === "login"
+            ? "Don't have an account? Sign up →"
+            : "Already have an account? Sign in →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// FORM FIELD
+// ============================================================================
+
+function FormField({ label, name, value, onChange, onBlur, error, placeholder, type = "text", hint, autoFocus, suffix }) {
+  return (
+    <div>
+      <label style={{
+        display: "block",
+        marginBottom: 8,
+        fontSize: 11,
+        fontFamily: "'DM Mono', monospace",
+        color: COLORS.body,
+        opacity: 0.7,
+        letterSpacing: "0.1em",
+        textTransform: "uppercase",
+      }}>
+        {label}
+      </label>
+      <div style={{ position: "relative" }}>
+        <input
+          type={type}
+          name={name}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
+          placeholder={placeholder}
+          autoFocus={autoFocus}
+          className={error ? "error" : ""}
+          style={{ paddingRight: suffix ? 80 : 16 }}
+        />
+        {suffix && (
+          <div style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)" }}>
+            {suffix}
+          </div>
+        )}
+      </div>
+      {error && (
+        <div style={{
+          marginTop: 6,
+          fontSize: 12,
+          color: COLORS.red,
+          fontFamily: "'DM Mono', monospace",
+          letterSpacing: "0.03em",
+          opacity: 0,
+          animation: "fadeIn 0.2s forwards",
+        }}>
+          ⚠ {error}
+        </div>
+      )}
+      {hint && !error && (
+        <div style={{
+          marginTop: 6,
+          fontSize: 12,
+          color: COLORS.body,
+          opacity: 0.5,
+          fontFamily: "'DM Mono', monospace",
+        }}>
+          {hint}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// DASHBOARD
+// ============================================================================
+
+function Dashboard({ user, token, onProfileUpdate, showToast }) {
+  const [activeTab, setActiveTab] = useState("passport");
+  const [loyaltyData, setLoyaltyData] = useState(null);
+  const [activities, setActivities] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchLoyaltyData();
+  }, []);
+
+  async function fetchLoyaltyData() {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/loyalty/scores`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      setLoyaltyData(data.scores);
+      setActivities(data.recent_activities || []);
+    } catch (err) {
+      console.error(err);
+      showToast("Could not load loyalty data", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const tabs = [
+    { id: "passport", label: "Passport" },
+    { id: "activities", label: "Record Activity" },
+    { id: "history", label: "History" },
+    { id: "profile", label: "Profile" },
+  ];
+
+  return (
+    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 0" }}>
+      {/* Tabs */}
+      <div className="tabs-container" style={{
+        display: "flex",
+        gap: 8,
+        marginBottom: 40,
+        borderBottom: `1px solid ${COLORS.hairline}`,
+        paddingBottom: 0,
+      }}>
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: activeTab === tab.id ? COLORS.green : COLORS.body,
+              opacity: activeTab === tab.id ? 1 : 0.6,
+              padding: "12px 20px",
+              fontFamily: "'DM Mono', monospace",
+              fontSize: 12,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+              borderBottom: `2px solid ${activeTab === tab.id ? COLORS.green : "transparent"}`,
+              marginBottom: "-1px",
+              transition: "all 0.2s",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content with fade */}
+      <div key={activeTab} className="fade-in">
+        {activeTab === "passport" && (
+          <PassportTab user={user} loyaltyData={loyaltyData} loading={loading} />
+        )}
+        {activeTab === "activities" && (
+          <ActivitiesTab
+            token={token}
+            onActivityLogged={() => { fetchLoyaltyData(); onProfileUpdate(); }}
+            showToast={showToast}
+          />
+        )}
+        {activeTab === "history" && (
+          <HistoryTab token={token} activities={activities} showToast={showToast} />
+        )}
+        {activeTab === "profile" && (
+          <ProfileTab user={user} token={token} onUpdate={onProfileUpdate} showToast={showToast} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// PASSPORT TAB
+// ============================================================================
+
+function PassportTab({ user, loyaltyData, loading }) {
+  if (loading || !loyaltyData) {
+    return <PassportSkeleton />;
+  }
+
+  const totalScore = loyaltyData.total_score;
+  const levels = [
+    { name: "apprentice", label: "Apprentice", min: 0, max: 99 },
+    { name: "supporter", label: "Supporter", min: 100, max: 499 },
+    { name: "devotee", label: "Devotee", min: 500, max: 1499 },
+    { name: "veteran", label: "Veteran", min: 1500, max: 2999 },
+    { name: "master", label: "Master", min: 3000, max: 4999 },
+    { name: "legend", label: "Legend", min: 5000, max: 999999 },
+  ];
+  const currentLevel = levels.find(l => totalScore >= l.min && totalScore <= l.max) || levels[0];
+  const nextLevel = levels[levels.indexOf(currentLevel) + 1];
+  const progressInLevel = nextLevel
+    ? ((totalScore - currentLevel.min) / (nextLevel.min - currentLevel.min)) * 100
+    : 100;
+
+  const initials = user.display_name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* PASSPORT CARD */}
+      <div style={{
+        background: `linear-gradient(135deg, ${COLORS.bgCard} 0%, ${COLORS.bgSoft} 100%)`,
+        border: `1px solid ${COLORS.green}`,
+        boxShadow: `0 0 60px ${COLORS.greenGlow}, inset 0 1px 0 rgba(26, 255, 110, 0.1)`,
+        borderRadius: 8,
+        overflow: "hidden",
+        position: "relative",
+      }}>
+        {/* Grain overlay */}
+        <div style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.9'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E")`,
+          opacity: 0.03,
+          pointerEvents: "none",
+        }} />
+
+        {/* Header strip */}
+        <div style={{
+          padding: "24px 32px",
+          borderBottom: `1px solid ${COLORS.green}30`,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          flexWrap: "wrap",
+          gap: 16,
+        }}>
+          <div>
+            <div style={{
+              fontSize: 24,
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontWeight: 900,
+              color: COLORS.green,
+              letterSpacing: "0.1em",
+            }}>
+              FOFA PASSPORT
+            </div>
+            <div style={{
+              fontSize: 10,
+              fontFamily: "'DM Mono', monospace",
+              color: COLORS.body,
+              opacity: 0.6,
+              letterSpacing: "0.2em",
+              marginTop: 4,
+            }}>
+              DECENTRALISED FAN IDENTITY
+            </div>
+          </div>
+          <div style={{
+            width: 56,
+            height: 56,
+            borderRadius: "50%",
+            background: COLORS.greenGlow,
+            border: `2px solid ${COLORS.green}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 22,
+            fontFamily: "'Barlow Condensed', sans-serif",
+            fontWeight: 900,
+            color: COLORS.green,
+          }}>
+            {initials}
+          </div>
+        </div>
+
+        {/* Main content */}
+        <div className="dashboard-header" style={{ padding: "32px" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 32,
+            marginBottom: 32,
+          }} className="grid-responsive">
+            <div>
+              <div style={{
+                fontSize: 10,
+                fontFamily: "'DM Mono', monospace",
+                color: COLORS.body,
+                opacity: 0.6,
+                letterSpacing: "0.2em",
+                marginBottom: 6,
+              }}>
+                HOLDER
+              </div>
+              <div style={{
+                fontSize: 28,
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontWeight: 900,
+                color: "#F2F5EE",
+                letterSpacing: "-0.01em",
+              }}>
+                {user.display_name}
+              </div>
+            </div>
+            <div>
+              <div style={{
+                fontSize: 10,
+                fontFamily: "'DM Mono', monospace",
+                color: COLORS.body,
+                opacity: 0.6,
+                letterSpacing: "0.2em",
+                marginBottom: 6,
+              }}>
+                CLUB ALLEGIANCE
+              </div>
+              <div style={{
+                fontSize: 24,
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontWeight: 700,
+                color: COLORS.gold,
+                letterSpacing: "0.02em",
+              }}>
+                {user.favorite_club || "—"}
+              </div>
+            </div>
+          </div>
+
+          {/* Level and progress */}
+          <div style={{
+            background: COLORS.bg,
+            border: `1px solid ${COLORS.hairline}`,
+            borderRadius: 4,
+            padding: 24,
+            marginBottom: 24,
+          }}>
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "baseline",
+              marginBottom: 16,
+              flexWrap: "wrap",
+              gap: 8,
+            }}>
+              <div>
+                <div style={{
+                  fontSize: 10,
+                  fontFamily: "'DM Mono', monospace",
+                  color: COLORS.body,
+                  opacity: 0.6,
+                  letterSpacing: "0.2em",
+                  marginBottom: 4,
+                }}>
+                  CURRENT LEVEL
+                </div>
+                <div style={{
+                  fontSize: 32,
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontWeight: 900,
+                  color: COLORS.green,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.02em",
+                }}>
+                  {currentLevel.label}
+                </div>
+              </div>
+              <div style={{
+                fontFamily: "'DM Mono', monospace",
+                fontSize: 14,
+                color: COLORS.body,
+                opacity: 0.8,
+              }}>
+                {Math.round(totalScore)} {nextLevel && `/ ${nextLevel.min}`}
+              </div>
+            </div>
+            
+            <div style={{
+              height: 6,
+              background: COLORS.bgCard,
+              borderRadius: 3,
+              overflow: "hidden",
+              border: `1px solid ${COLORS.hairline}`,
+            }}>
+              <div style={{
+                height: "100%",
+                width: `${progressInLevel}%`,
+                background: `linear-gradient(90deg, ${COLORS.green}, ${COLORS.teal})`,
+                transition: "width 1s cubic-bezier(0.4, 0, 0.2, 1)",
+                boxShadow: `0 0 12px ${COLORS.green}`,
+              }} />
+            </div>
+            
+            {nextLevel && (
+              <div style={{
+                marginTop: 12,
+                fontSize: 11,
+                fontFamily: "'DM Mono', monospace",
+                color: COLORS.body,
+                opacity: 0.5,
+                letterSpacing: "0.1em",
+              }}>
+                {nextLevel.min - totalScore} POINTS TO {nextLevel.label.toUpperCase()}
+              </div>
+            )}
+          </div>
+
+          {/* Dimension scores */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+            gap: 12,
+          }}>
+            {[
+              { label: "Engagement", value: loyaltyData.engagement_score, icon: "◆" },
+              { label: "Passion", value: loyaltyData.passion_score, icon: "♦" },
+              { label: "Knowledge", value: loyaltyData.knowledge_score, icon: "◇" },
+              { label: "Consistency", value: loyaltyData.consistency_score, icon: "◈" },
+              { label: "Community", value: loyaltyData.community_score, icon: "⬡" },
+              { label: "Growth", value: loyaltyData.growth_score, icon: "△" },
+            ].map((dim, i) => (
+              <div
+                key={i}
+                style={{
+                  background: COLORS.bg,
+                  padding: "16px 14px",
+                  borderRadius: 4,
+                  border: `1px solid ${COLORS.hairline}`,
+                  textAlign: "center",
+                  transition: "all 0.2s",
+                  opacity: 0,
+                  animation: `fadeIn 0.4s ease-out ${i * 0.08}s forwards`,
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.borderColor = COLORS.green;
+                  e.currentTarget.style.transform = "translateY(-2px)";
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = COLORS.hairline;
+                  e.currentTarget.style.transform = "translateY(0)";
+                }}
+              >
+                <div style={{ fontSize: 14, color: COLORS.green, marginBottom: 4 }}>{dim.icon}</div>
+                <div style={{
+                  fontSize: 10,
+                  fontFamily: "'DM Mono', monospace",
+                  opacity: 0.6,
+                  marginBottom: 6,
+                  letterSpacing: "0.15em",
+                  textTransform: "uppercase",
+                }}>
+                  {dim.label}
+                </div>
+                <div style={{
+                  fontSize: 22,
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  color: "#F2F5EE",
+                  fontWeight: 700,
+                }}>
+                  {Math.round(dim.value)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Footer strip */}
+        <div style={{
+          padding: "16px 32px",
+          borderTop: `1px solid ${COLORS.green}30`,
+          background: COLORS.bg,
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: 10,
+          fontFamily: "'DM Mono', monospace",
+          color: COLORS.body,
+          opacity: 0.6,
+          letterSpacing: "0.15em",
+          flexWrap: "wrap",
+          gap: 8,
+        }}>
+          <div>MEMBER SINCE {new Date(user.created_at).toLocaleDateString("en-GB")}</div>
+          <div>@{user.username}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// PASSPORT SKELETON
+// ============================================================================
+
+function PassportSkeleton() {
+  return (
+    <div style={{
+      background: COLORS.bgCard,
+      border: `1px solid ${COLORS.hairline}`,
+      borderRadius: 8,
+      padding: 32,
+    }}>
+      <div style={{ marginBottom: 32 }}>
+        <Skeleton width={200} height={24} style={{ marginBottom: 12 }} />
+        <Skeleton width={150} height={12} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginBottom: 32 }}>
+        <div>
+          <Skeleton width={80} height={10} style={{ marginBottom: 8 }} />
+          <Skeleton width="80%" height={28} />
+        </div>
+        <div>
+          <Skeleton width={100} height={10} style={{ marginBottom: 8 }} />
+          <Skeleton width="60%" height={24} />
+        </div>
+      </div>
+      <Skeleton height={80} style={{ marginBottom: 24 }} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
+        {[1,2,3,4,5,6].map(i => <Skeleton key={i} height={80} />)}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// ACTIVITIES TAB (LOG NEW ACTIVITY)
+// ============================================================================
+
+function ActivitiesTab({ token, onActivityLogged, showToast }) {
+  const [activityType, setActivityType] = useState("engagement");
+  const [points, setPoints] = useState(10);
+  const [description, setDescription] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const activityTypes = [
+    { value: "engagement", label: "Engagement", desc: "Watched a match, attended a game" },
+    { value: "passion", label: "Passion", desc: "Expressed support, wore club colors" },
+    { value: "knowledge", label: "Knowledge", desc: "Quiz, trivia, match analysis" },
+    { value: "consistency", label: "Consistency", desc: "Regular check-ins, daily engagement" },
+    { value: "community", label: "Community", desc: "Helped fellow fans, moderated discussions" },
+    { value: "growth", label: "Growth", desc: "Brought new fans, expanded the community" },
+  ];
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!description.trim()) {
+      showToast("Please describe your activity", "error");
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/loyalty/activity`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ activity_type: activityType, description, points: parseInt(points) }),
+      });
+
+      if (!response.ok) throw new Error("Failed to log activity");
+
+      setDescription("");
+      setPoints(10);
+      onActivityLogged();
+      showToast(`+${points} points added to ${activityType}! 🎉`, "success");
+    } catch (err) {
+      showToast("Failed to log activity. Try again.", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{ maxWidth: 700 }}>
+      <div style={{ marginBottom: 32 }}>
+        <h2 style={{
+          color: "#F2F5EE",
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontSize: "clamp(28px, 5vw, 40px)",
+          fontWeight: 900,
+          margin: "0 0 8px",
+          letterSpacing: "-0.01em",
+        }}>
+          Record Activity
+        </h2>
+        <p style={{ color: COLORS.body, opacity: 0.7, margin: 0 }}>
+          Log your fan activities and earn loyalty points
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit} style={{
+        background: COLORS.bgSoft,
+        border: `1px solid ${COLORS.hairline}`,
+        borderRadius: 4,
+        padding: 32,
+        display: "flex",
+        flexDirection: "column",
+        gap: 24,
+      }}>
+        {/* Activity Type - visual selector */}
+        <div>
+          <label style={{
+            display: "block",
+            marginBottom: 12,
+            fontSize: 11,
+            fontFamily: "'DM Mono', monospace",
+            color: COLORS.body,
+            opacity: 0.7,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+          }}>
+            Activity Type
+          </label>
+          <div className="grid-responsive" style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+            gap: 8,
+          }}>
+            {activityTypes.map(t => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => setActivityType(t.value)}
+                style={{
+                  padding: "14px 16px",
+                  background: activityType === t.value ? COLORS.greenGlow : COLORS.bg,
+                  border: `1px solid ${activityType === t.value ? COLORS.green : COLORS.hairline}`,
+                  borderRadius: 4,
+                  textAlign: "left",
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                  color: COLORS.body,
+                }}
+              >
+                <div style={{
+                  fontSize: 13,
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontWeight: 700,
+                  color: activityType === t.value ? COLORS.green : "#F2F5EE",
+                  letterSpacing: "0.05em",
+                  textTransform: "uppercase",
+                  marginBottom: 2,
+                }}>
+                  {t.label}
+                </div>
+                <div style={{
+                  fontSize: 11,
+                  opacity: 0.6,
+                  textTransform: "none",
+                  letterSpacing: 0,
+                  fontFamily: "'Crimson Pro', serif",
+                }}>
+                  {t.desc}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <FormField
+          label="Description"
+          name="description"
+          value={description}
+          onChange={setDescription}
+          placeholder="What did you do?"
+        />
+
+        {/* Points slider */}
+        <div>
+          <label style={{
+            display: "flex",
+            justifyContent: "space-between",
+            marginBottom: 12,
+            fontSize: 11,
+            fontFamily: "'DM Mono', monospace",
+            color: COLORS.body,
+            opacity: 0.7,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+          }}>
+            <span>Points</span>
+            <span style={{ color: COLORS.green, opacity: 1 }}>{points}</span>
+          </label>
+          <input
+            type="range"
+            min="1"
+            max="100"
+            value={points}
+            onChange={(e) => setPoints(e.target.value)}
+            style={{
+              width: "100%",
+              accentColor: COLORS.green,
+            }}
+          />
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            marginTop: 4,
+            fontSize: 10,
+            fontFamily: "'DM Mono', monospace",
+            opacity: 0.5,
+          }}>
+            <span>1</span>
+            <span>50</span>
+            <span>100</span>
+          </div>
+        </div>
+
+        <button type="submit" className="btn-primary" disabled={loading} style={{ marginTop: 8 }}>
+          {loading ? (
+            <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
+              <LoadingSpinner size={14} color={COLORS.bg} />
+              Logging...
+            </span>
+          ) : (
+            `Log Activity (+${points})`
+          )}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ============================================================================
+// HISTORY TAB
+// ============================================================================
+
+function HistoryTab({ token, showToast }) {
+  const [activities, setActivities] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all");
+
+  useEffect(() => {
+    fetchAllActivities();
+  }, []);
+
+  async function fetchAllActivities() {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/loyalty/activities`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      setActivities(data.activities || []);
+    } catch (err) {
+      showToast("Could not load history", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const filtered = filter === "all"
+    ? activities
+    : activities.filter(a => a.activity_type === filter);
+
+  const filterTypes = ["all", "engagement", "passion", "knowledge", "consistency", "community", "growth"];
+
+  return (
+    <div>
+      <div style={{ marginBottom: 32 }}>
+        <h2 style={{
+          color: "#F2F5EE",
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontSize: "clamp(28px, 5vw, 40px)",
+          fontWeight: 900,
+          margin: "0 0 8px",
+        }}>
+          Activity History
+        </h2>
+        <p style={{ color: COLORS.body, opacity: 0.7, margin: 0 }}>
+          {activities.length} total {activities.length === 1 ? "activity" : "activities"}
+        </p>
+      </div>
+
+      {/* Filter chips */}
+      <div style={{
+        display: "flex",
+        gap: 8,
+        marginBottom: 24,
+        flexWrap: "wrap",
+      }}>
+        {filterTypes.map(t => (
+          <button
+            key={t}
+            onClick={() => setFilter(t)}
+            style={{
+              padding: "8px 14px",
+              background: filter === t ? COLORS.greenGlow : "transparent",
+              border: `1px solid ${filter === t ? COLORS.green : COLORS.hairline}`,
+              color: filter === t ? COLORS.green : COLORS.body,
+              fontSize: 11,
+              borderRadius: 100,
+              textTransform: "capitalize",
+              fontFamily: "'DM Mono', monospace",
+              letterSpacing: "0.05em",
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[1,2,3,4,5].map(i => <Skeleton key={i} height={72} />)}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div style={{
+          textAlign: "center",
+          padding: "80px 20px",
+          background: COLORS.bgSoft,
+          border: `1px solid ${COLORS.hairline}`,
+          borderRadius: 4,
+        }}>
+          <div style={{ fontSize: 48, opacity: 0.3, marginBottom: 16 }}>⚡</div>
+          <div style={{
+            fontFamily: "'Barlow Condensed', sans-serif",
+            fontSize: 20,
+            color: "#F2F5EE",
+            marginBottom: 8,
+          }}>
+            {filter === "all" ? "No activities yet" : `No ${filter} activities`}
+          </div>
+          <div style={{ color: COLORS.body, opacity: 0.6, fontSize: 14 }}>
+            {filter === "all" ? "Log your first activity to start earning loyalty points" : "Try a different filter"}
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {filtered.map((activity, i) => (
+            <div
+              key={activity.id || i}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                padding: "18px 20px",
+                background: COLORS.bgSoft,
+                borderRadius: 4,
+                border: `1px solid ${COLORS.hairline}`,
+                transition: "all 0.2s",
+                opacity: 0,
+                animation: `fadeIn 0.3s ease-out ${i * 0.03}s forwards`,
+                gap: 16,
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = COLORS.green;
+                e.currentTarget.style.background = COLORS.bgCard;
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = COLORS.hairline;
+                e.currentTarget.style.background = COLORS.bgSoft;
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontFamily: "'DM Mono', monospace",
+                  fontSize: 10,
+                  color: COLORS.green,
+                  letterSpacing: "0.15em",
+                  textTransform: "uppercase",
+                  marginBottom: 4,
+                }}>
+                  {activity.activity_type}
+                </div>
+                {activity.description && (
+                  <div style={{ color: "#F2F5EE", marginBottom: 4, fontSize: 15 }}>
+                    {activity.description}
+                  </div>
+                )}
+                <div style={{
+                  fontSize: 11,
+                  opacity: 0.5,
+                  fontFamily: "'DM Mono', monospace",
+                }}>
+                  {new Date(activity.created_at).toLocaleDateString("en-GB", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </div>
+              </div>
+              <div style={{
+                color: COLORS.green,
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontWeight: 900,
+                fontSize: 20,
+                flexShrink: 0,
+                letterSpacing: "0.02em",
+              }}>
+                +{activity.points}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// PROFILE TAB
+// ============================================================================
+
+function ProfileTab({ user, token, onUpdate, showToast }) {
+  const [editing, setEditing] = useState(false);
+  const [formData, setFormData] = useState({
+    display_name: user.display_name,
+    favorite_club: user.favorite_club || "",
+    bio: user.bio || "",
+  });
+  const [loading, setLoading] = useState(false);
+
+  async function handleSave() {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/user/profile`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(formData),
+      });
+
+      if (!response.ok) throw new Error("Failed to update");
+      
+      showToast("Profile updated ✓", "success");
+      setEditing(false);
+      onUpdate();
+    } catch (err) {
+      showToast("Could not update profile", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleCancel() {
+    setFormData({
+      display_name: user.display_name,
+      favorite_club: user.favorite_club || "",
+      bio: user.bio || "",
+    });
+    setEditing(false);
+  }
+
+  return (
+    <div style={{ maxWidth: 600 }}>
+      <div style={{ marginBottom: 32 }}>
+        <h2 style={{
+          color: "#F2F5EE",
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontSize: "clamp(28px, 5vw, 40px)",
+          fontWeight: 900,
+          margin: "0 0 8px",
+        }}>
+          My Profile
+        </h2>
+        <p style={{ color: COLORS.body, opacity: 0.7, margin: 0 }}>
+          Manage your account information
+        </p>
+      </div>
+
+      <div style={{
+        background: COLORS.bgSoft,
+        border: `1px solid ${COLORS.hairline}`,
+        borderRadius: 4,
+        padding: 32,
+        display: "flex",
+        flexDirection: "column",
+        gap: 20,
+      }}>
+        <FormField
+          label="Email"
+          value={user.email}
+          onChange={() => {}}
+          type="email"
+        />
+        {/* Disable email */}
+        <style>{`input[value="${user.email}"] { opacity: 0.5; cursor: not-allowed; pointer-events: none; }`}</style>
+
+        <FormField
+          label="Username"
+          value={user.username}
+          onChange={() => {}}
+        />
+
+        <FormField
+          label="Display Name"
+          value={formData.display_name}
+          onChange={editing ? (v) => setFormData({...formData, display_name: v}) : () => {}}
+        />
+
+        <FormField
+          label="Favorite Club"
+          value={formData.favorite_club}
+          onChange={editing ? (v) => setFormData({...formData, favorite_club: v}) : () => {}}
+          placeholder="e.g., Barcelona"
+        />
+
+        <div>
+          <label style={{
+            display: "block",
+            marginBottom: 8,
+            fontSize: 11,
+            fontFamily: "'DM Mono', monospace",
+            color: COLORS.body,
+            opacity: 0.7,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+          }}>
+            Bio
+          </label>
+          <textarea
+            value={formData.bio}
+            onChange={editing ? (e) => setFormData({...formData, bio: e.target.value}) : () => {}}
+            disabled={!editing}
+            placeholder="Tell us about yourself..."
+            style={{ minHeight: 100, resize: "vertical", opacity: editing ? 1 : 0.6 }}
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+          {!editing ? (
+            <button className="btn-primary" onClick={() => setEditing(true)}>
+              Edit Profile
+            </button>
+          ) : (
+            <>
+              <button className="btn-primary" onClick={handleSave} disabled={loading} style={{ flex: 1 }}>
+                {loading ? (
+                  <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
+                    <LoadingSpinner size={14} color={COLORS.bg} />
+                    Saving...
+                  </span>
+                ) : "Save Changes"}
+              </button>
+              <button className="btn-ghost" onClick={handleCancel}>Cancel</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

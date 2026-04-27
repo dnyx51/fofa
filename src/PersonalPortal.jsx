@@ -1,334 +1,498 @@
 import React, { useEffect, useRef, useState } from "react";
 
 // ============================================================================
-// PERSONAL PORTAL — with DID Passport & On-Chain Interaction Stamps
+// FOFA PERSONAL PORTAL - POLISHED EDITION
 // ============================================================================
 
 const COLORS = {
   bg: "#080C08",
   bgSoft: "#0E140E",
+  bgCard: "#0A1109",
   green: "#1AFF6E",
   greenDeep: "#0D8F3C",
+  greenGlow: "rgba(26, 255, 110, 0.15)",
   body: "#C8D4C0",
   gold: "#C8A84B",
   teal: "#1AC8C8",
   red: "#FF4757",
   hairline: "rgba(200, 212, 192, 0.08)",
+  hairlineStrong: "rgba(200, 212, 192, 0.15)",
 };
 
 const API_URL = import.meta.env.VITE_API_URL || "https://fofa-xi.vercel.app/api";
 
 // ============================================================================
-// PERSONAL PORTAL (root)
+// MAIN COMPONENT
 // ============================================================================
 
 export default function PersonalPortal() {
   const [currentView, setCurrentView] = useState("landing");
   const [token, setToken] = useState(localStorage.getItem("fofaToken") || null);
   const [user, setUser] = useState(null);
-  const [passport, setPassport] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     if (token) {
       fetchUserProfile();
-      setCurrentView("portal");
     } else {
+      setInitialLoading(false);
       setCurrentView("landing");
     }
-  }, [token]);
+  }, []);
+
+  function showToast(message, type = "success") {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  }
 
   async function fetchUserProfile() {
     try {
-      const response = await fetch(`${API_URL}/api/user/profile`, {
+      const response = await fetch(`${API_URL}/user/profile`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!response.ok) throw new Error("Failed to fetch profile");
+      if (!response.ok) throw new Error("Session expired");
       const data = await response.json();
       setUser(data.user);
-      setPassport(data.passport || { match_attendance: 0, merch_purchases: 0, social_media: 0, interactions: [] });
+      setCurrentView("portal");
     } catch (err) {
       console.error(err);
-      setError("Session expired. Please log in again.");
       logout();
-    }
-  }
-
-  async function handleRegister(e) {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-
-    const formData = new FormData(e.target);
-    const email = formData.get("email");
-    const password = formData.get("password");
-    const username = formData.get("username");
-    const display_name = formData.get("display_name");
-    const favorite_club = formData.get("favorite_club");
-
-    try {
-      const response = await fetch(`${API_URL}/api/auth/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, username, display_name, favorite_club }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Registration failed");
-      }
-
-      setToken(data.token);
-      localStorage.setItem("fofaToken", data.token);
-      setSuccess("Welcome to FOFA! Your DID passport has been created.");
-      setCurrentView("portal");
-      e.target.reset();
-    } catch (err) {
-      setError(err.message);
+      showToast("Session expired. Please log in again.", "error");
     } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleLogin(e) {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-
-    const formData = new FormData(e.target);
-    const email = formData.get("email");
-    const password = formData.get("password");
-
-    try {
-      const response = await fetch(`${API_URL}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Login failed");
-      }
-
-      setToken(data.token);
-      localStorage.setItem("fofaToken", data.token);
-      setSuccess("Welcome back!");
-      setCurrentView("portal");
-      e.target.reset();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      setInitialLoading(false);
     }
   }
 
   function logout() {
     setToken(null);
     setUser(null);
-    setPassport(null);
     localStorage.removeItem("fofaToken");
     setCurrentView("landing");
+    showToast("Signed out successfully", "success");
+  }
+
+  function handleAuthSuccess(newToken, newUser, message) {
+    setToken(newToken);
+    localStorage.setItem("fofaToken", newToken);
+    setUser(newUser);
+    setCurrentView("portal");
+    showToast(message, "success");
+  }
+
+  // Initial loading screen
+  if (initialLoading) {
+    return (
+      <div style={{
+        background: COLORS.bg,
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "column",
+        gap: 24,
+      }}>
+        <GlobalStyles />
+        <div style={{
+          fontSize: 48,
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontWeight: 900,
+          color: COLORS.green,
+          letterSpacing: "0.05em",
+          animation: "pulse 2s ease-in-out infinite",
+        }}>
+          FOFA
+        </div>
+        <LoadingSpinner />
+      </div>
+    );
   }
 
   return (
-    <div
-      style={{
-        background: COLORS.bg,
-        color: COLORS.body,
-        fontFamily: "'Crimson Pro', Georgia, serif",
-        minHeight: "100vh",
-        padding: "20px",
-      }}
-    >
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;700;900&family=Crimson+Pro:ital,wght@0,300;0,400;0,500;1,400&family=DM+Mono:wght@400;500&display=swap');
+    <div style={{
+      background: COLORS.bg,
+      color: COLORS.body,
+      fontFamily: "'Crimson Pro', Georgia, serif",
+      minHeight: "100vh",
+      position: "relative",
+    }}>
+      <GlobalStyles />
+      
+      {/* Ambient background effect */}
+      <div style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: `radial-gradient(circle at 20% 30%, ${COLORS.greenGlow} 0%, transparent 50%), radial-gradient(circle at 80% 70%, rgba(26, 200, 200, 0.05) 0%, transparent 50%)`,
+        pointerEvents: "none",
+        zIndex: 0,
+      }} />
 
-        * { box-sizing: border-box; }
-        body { margin: 0; padding: 0; }
+      {/* Toast notifications */}
+      {toast && <Toast message={toast.message} type={toast.type} />}
 
-        input, textarea, select {
-          font-family: 'Crimson Pro', Georgia, serif;
-          background: ${COLORS.bgSoft};
-          border: 1px solid ${COLORS.hairline};
-          color: ${COLORS.body};
-          padding: 12px 16px;
-          border-radius: 4px;
-          font-size: 16px;
-          transition: all 0.2s;
-        }
+      {/* Header */}
+      <Header token={token} onLogout={logout} />
 
-        input:focus, textarea:focus, select:focus {
-          outline: none;
-          border-color: ${COLORS.green};
-          box-shadow: 0 0 0 3px rgba(26, 255, 110, 0.1);
-        }
-
-        button {
-          font-family: 'DM Mono', monospace;
-          font-size: 12px;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-          padding: 12px 24px;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          transition: all 0.2s;
-          font-weight: 500;
-        }
-
-        .btn-primary {
-          background: ${COLORS.green};
-          color: ${COLORS.bg};
-        }
-
-        .btn-primary:hover:not(:disabled) {
-          background: #2cff7f;
-          transform: translateY(-2px);
-        }
-
-        .btn-primary:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        .btn-ghost {
-          background: transparent;
-          border: 1px solid ${COLORS.green};
-          color: ${COLORS.green};
-        }
-
-        .btn-ghost:hover {
-          background: rgba(26, 255, 110, 0.1);
-        }
-
-        .btn-danger {
-          background: ${COLORS.red};
-          color: white;
-        }
-
-        .btn-danger:hover {
-          background: #ff6a7f;
-        }
-
-        @keyframes stamp-appear {
-          0% { transform: scale(0) rotate(-15deg); opacity: 0; }
-          60% { transform: scale(1.15) rotate(3deg); opacity: 1; }
-          100% { transform: scale(1) rotate(0deg); opacity: 1; }
-        }
-
-        .stamp-badge {
-          animation: stamp-appear 0.4s cubic-bezier(.2,.7,.2,1) forwards;
-        }
-
-        @keyframes pulse-glow {
-          0%, 100% { box-shadow: 0 0 8px rgba(26, 255, 110, 0.2); }
-          50% { box-shadow: 0 0 20px rgba(26, 255, 110, 0.4); }
-        }
-
-        .did-glow {
-          animation: pulse-glow 3s ease-in-out infinite;
-        }
-      `}</style>
-
-      {/* HEADER */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 40,
-          paddingBottom: 20,
-          borderBottom: `1px solid ${COLORS.hairline}`,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div
-            style={{
-              fontSize: 24,
-              fontFamily: "'Barlow Condensed', sans-serif",
-              fontWeight: 900,
-              color: COLORS.green,
-            }}
-          >
-            FOFA
-          </div>
-          <span style={{
-            fontFamily: "'DM Mono', monospace",
-            fontSize: 10,
-            letterSpacing: "0.2em",
-            color: COLORS.gold,
-            textTransform: "uppercase",
-          }}>
-            Passport
-          </span>
-        </div>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <a
-            href="#"
-            onClick={(e) => { e.preventDefault(); window.location.hash = ""; }}
-            style={{
-              fontFamily: "'DM Mono', monospace",
-              fontSize: 11,
-              color: COLORS.body,
-              opacity: 0.6,
-              textDecoration: "none",
-            }}
-          >
-            Back to Site
-          </a>
-          {token && (
-            <button className="btn-ghost" onClick={logout}>
-              Logout
-            </button>
-          )}
-        </div>
+      {/* Main content */}
+      <div style={{ position: "relative", zIndex: 1, padding: "0 20px 80px" }}>
+        {currentView === "landing" && (
+          <LandingView setCurrentView={setCurrentView} />
+        )}
+        {currentView === "login" && (
+          <AuthForm
+            type="login"
+            onSuccess={(token, user) => handleAuthSuccess(token, user, `Welcome back, ${user.display_name}! ⚽`)}
+            onError={(msg) => showToast(msg, "error")}
+            onSwitchView={() => setCurrentView("register")}
+          />
+        )}
+        {currentView === "register" && (
+          <AuthForm
+            type="register"
+            onSuccess={(token, user) => handleAuthSuccess(token, user, `Welcome to FOFA, ${user.display_name}! 🎉`)}
+            onError={(msg) => showToast(msg, "error")}
+            onSwitchView={() => setCurrentView("login")}
+          />
+        )}
+        {currentView === "portal" && user && (
+          <Dashboard
+            user={user}
+            token={token}
+            onProfileUpdate={fetchUserProfile}
+            showToast={showToast}
+          />
+        )}
       </div>
+    </div>
+  );
+}
 
-      {/* ERROR / SUCCESS MESSAGES */}
-      {error && (
-        <div
-          style={{
-            background: `${COLORS.red}20`,
-            border: `1px solid ${COLORS.red}`,
-            color: "#FF9AAD",
-            padding: "16px",
-            borderRadius: "4px",
-            marginBottom: 20,
-          }}
-        >
-          {error}
-        </div>
-      )}
-      {success && (
-        <div
-          style={{
-            background: `${COLORS.green}20`,
-            border: `1px solid ${COLORS.green}`,
-            color: COLORS.green,
-            padding: "16px",
-            borderRadius: "4px",
-            marginBottom: 20,
-          }}
-        >
-          {success}
-        </div>
-      )}
+// ============================================================================
+// GLOBAL STYLES
+// ============================================================================
 
-      {currentView === "landing" && <LandingView setCurrentView={setCurrentView} />}
-      {currentView === "login" && (
-        <AuthForm type="login" onSubmit={handleLogin} loading={loading} onSwitchView={() => setCurrentView("register")} />
-      )}
-      {currentView === "register" && (
-        <AuthForm type="register" onSubmit={handleRegister} loading={loading} onSwitchView={() => setCurrentView("login")} />
-      )}
-      {currentView === "portal" && user && (
-        <PortalDashboard user={user} passport={passport} token={token} onRefresh={fetchUserProfile} apiUrl={API_URL} />
-      )}
+function GlobalStyles() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;700;900&family=Crimson+Pro:ital,wght@0,300;0,400;0,500;1,400&family=DM+Mono:wght@400;500&display=swap');
+      
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+      
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      @keyframes slideInUp {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      @keyframes slideInRight {
+        from { opacity: 0; transform: translateX(30px); }
+        to { opacity: 1; transform: translateX(0); }
+      }
+      
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+      
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      
+      @keyframes shimmer {
+        0% { background-position: -1000px 0; }
+        100% { background-position: 1000px 0; }
+      }
+      
+      @keyframes slideInDown {
+        from { opacity: 0; transform: translateY(-20px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      .fade-in { animation: fadeIn 0.4s ease-out forwards; }
+      .slide-up { animation: slideInUp 0.5s ease-out forwards; }
+      .slide-right { animation: slideInRight 0.4s ease-out forwards; }
+      
+      input, textarea, select {
+        font-family: 'Crimson Pro', Georgia, serif;
+        background: ${COLORS.bgSoft};
+        border: 1px solid ${COLORS.hairline};
+        color: ${COLORS.body};
+        padding: 14px 16px;
+        border-radius: 4px;
+        font-size: 16px;
+        transition: all 0.2s ease;
+        width: 100%;
+      }
+      
+      input:focus, textarea:focus, select:focus {
+        outline: none;
+        border-color: ${COLORS.green};
+        box-shadow: 0 0 0 3px ${COLORS.greenGlow};
+        background: ${COLORS.bgCard};
+      }
+      
+      input:hover:not(:focus):not(:disabled),
+      textarea:hover:not(:focus):not(:disabled),
+      select:hover:not(:focus):not(:disabled) {
+        border-color: ${COLORS.hairlineStrong};
+      }
+      
+      input.error, textarea.error {
+        border-color: ${COLORS.red};
+        box-shadow: 0 0 0 3px rgba(255, 71, 87, 0.1);
+      }
+      
+      input.success, textarea.success {
+        border-color: ${COLORS.green};
+      }
+      
+      button {
+        font-family: 'DM Mono', monospace;
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        padding: 14px 28px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-weight: 500;
+        position: relative;
+        overflow: hidden;
+      }
+      
+      button:active:not(:disabled) {
+        transform: scale(0.97);
+      }
+      
+      .btn-primary {
+        background: ${COLORS.green};
+        color: ${COLORS.bg};
+        font-weight: 700;
+      }
+      
+      .btn-primary:hover:not(:disabled) {
+        background: #2dff82;
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px ${COLORS.greenGlow};
+      }
+      
+      .btn-primary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      
+      .btn-ghost {
+        background: transparent;
+        border: 1px solid ${COLORS.green};
+        color: ${COLORS.green};
+      }
+      
+      .btn-ghost:hover:not(:disabled) {
+        background: ${COLORS.greenGlow};
+        transform: translateY(-1px);
+      }
+      
+      .btn-danger {
+        background: transparent;
+        border: 1px solid ${COLORS.red};
+        color: ${COLORS.red};
+      }
+      
+      .btn-danger:hover:not(:disabled) {
+        background: rgba(255, 71, 87, 0.1);
+      }
+      
+      .btn-text {
+        background: none;
+        border: none;
+        color: ${COLORS.green};
+        padding: 8px 0;
+      }
+      
+      .btn-text:hover {
+        color: #2dff82;
+      }
+      
+      /* Mobile responsive */
+      @media (max-width: 768px) {
+        h1 { font-size: clamp(32px, 10vw, 48px) !important; }
+        h2 { font-size: clamp(24px, 7vw, 32px) !important; }
+        .grid-responsive {
+          grid-template-columns: 1fr !important;
+        }
+        .dashboard-header {
+          flex-direction: column !important;
+          text-align: center !important;
+        }
+        .dashboard-avatar {
+          margin: 0 auto !important;
+        }
+        .tabs-container {
+          overflow-x: auto !important;
+          -webkit-overflow-scrolling: touch !important;
+          scrollbar-width: none !important;
+        }
+        .tabs-container::-webkit-scrollbar {
+          display: none !important;
+        }
+      }
+      
+      /* Scrollbar styling */
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: ${COLORS.bg}; }
+      ::-webkit-scrollbar-thumb { background: ${COLORS.hairlineStrong}; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: ${COLORS.green}; }
+      
+      /* Skeleton loading */
+      .skeleton {
+        background: linear-gradient(90deg, ${COLORS.bgSoft} 0%, ${COLORS.bgCard} 50%, ${COLORS.bgSoft} 100%);
+        background-size: 1000px 100%;
+        animation: shimmer 2s infinite linear;
+        border-radius: 4px;
+      }
+    `}</style>
+  );
+}
+
+// ============================================================================
+// TOAST NOTIFICATION
+// ============================================================================
+
+function Toast({ message, type }) {
+  const colors = {
+    success: { bg: COLORS.greenGlow, border: COLORS.green, text: COLORS.green },
+    error: { bg: "rgba(255, 71, 87, 0.15)", border: COLORS.red, text: "#FF9AAD" },
+    info: { bg: "rgba(26, 200, 200, 0.15)", border: COLORS.teal, text: COLORS.teal },
+  };
+  const c = colors[type] || colors.info;
+
+  return (
+    <div style={{
+      position: "fixed",
+      top: 24,
+      right: 24,
+      zIndex: 1000,
+      background: COLORS.bgCard,
+      border: `1px solid ${c.border}`,
+      borderLeft: `4px solid ${c.border}`,
+      color: c.text,
+      padding: "16px 24px",
+      borderRadius: 4,
+      minWidth: 280,
+      maxWidth: "calc(100vw - 48px)",
+      boxShadow: "0 16px 48px rgba(0, 0, 0, 0.4)",
+      animation: "slideInRight 0.3s ease-out forwards",
+      fontFamily: "'DM Mono', monospace",
+      fontSize: 13,
+      letterSpacing: "0.03em",
+    }}>
+      {message}
+    </div>
+  );
+}
+
+// ============================================================================
+// LOADING SPINNER
+// ============================================================================
+
+function LoadingSpinner({ size = 24, color = COLORS.green }) {
+  return (
+    <div style={{
+      width: size,
+      height: size,
+      border: `2px solid ${COLORS.hairline}`,
+      borderTopColor: color,
+      borderRadius: "50%",
+      animation: "spin 0.8s linear infinite",
+      display: "inline-block",
+    }} />
+  );
+}
+
+// ============================================================================
+// SKELETON LOADER
+// ============================================================================
+
+function Skeleton({ width = "100%", height = 20, style = {} }) {
+  return (
+    <div
+      className="skeleton"
+      style={{ width, height, ...style }}
+    />
+  );
+}
+
+// ============================================================================
+// HEADER
+// ============================================================================
+
+function Header({ token, onLogout }) {
+  return (
+    <div style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: "20px 24px",
+      borderBottom: `1px solid ${COLORS.hairline}`,
+      position: "relative",
+      zIndex: 10,
+      backdropFilter: "blur(10px)",
+    }}>
+      <a href="/" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{
+          fontSize: 24,
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontWeight: 900,
+          color: COLORS.green,
+          letterSpacing: "0.05em",
+        }}>
+          FOFA
+        </div>
+        <div style={{
+          fontSize: 10,
+          fontFamily: "'DM Mono', monospace",
+          color: COLORS.body,
+          opacity: 0.5,
+          letterSpacing: "0.15em",
+          borderLeft: `1px solid ${COLORS.hairline}`,
+          paddingLeft: 12,
+        }}>
+          PASSPORT
+        </div>
+      </a>
+      
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <a href="/" style={{
+          color: COLORS.body,
+          opacity: 0.7,
+          textDecoration: "none",
+          fontSize: 12,
+          fontFamily: "'DM Mono', monospace",
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+          transition: "opacity 0.2s",
+        }}
+          onMouseEnter={e => e.target.style.opacity = "1"}
+          onMouseLeave={e => e.target.style.opacity = "0.7"}
+        >
+          ← Back to Site
+        </a>
+        {token && (
+          <button className="btn-ghost" onClick={onLogout}>
+            Logout
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -339,34 +503,59 @@ export default function PersonalPortal() {
 
 function LandingView({ setCurrentView }) {
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto" }}>
-      <div style={{ textAlign: "center", marginBottom: 80 }}>
-        <h1
-          style={{
-            fontSize: "clamp(42px, 8vw, 96px)",
-            fontFamily: "'Barlow Condensed', sans-serif",
-            fontWeight: 900,
-            margin: "0 0 24px",
-            color: "#F2F5EE",
-          }}
-        >
-          Your Fan Passport
-        </h1>
-        <p style={{ fontSize: 20, color: COLORS.body, marginBottom: 16, maxWidth: 640, margin: "0 auto 16px" }}>
-          A decentralised identity for football fans. Every match you attend, every shirt you buy,
-          every moment you share — stamped on-chain, owned by you.
-        </p>
-        <p style={{
-          fontSize: 14,
+    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "60px 0" }}>
+      <div style={{ textAlign: "center", marginBottom: 80 }} className="slide-up">
+        <div style={{
+          fontSize: 12,
           fontFamily: "'DM Mono', monospace",
-          color: COLORS.teal,
-          marginBottom: 48,
+          color: COLORS.gold,
+          letterSpacing: "0.2em",
+          marginBottom: 24,
+          opacity: 0,
+          animation: "fadeIn 0.6s ease-out 0.1s forwards",
         }}>
-          Powered by Ethereum DID
+          — YOUR DIGITAL IDENTITY
+        </div>
+        
+        <h1 style={{
+          fontSize: "clamp(42px, 8vw, 96px)",
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontWeight: 900,
+          margin: "0 0 24px",
+          color: "#F2F5EE",
+          lineHeight: 0.95,
+          letterSpacing: "-0.02em",
+          opacity: 0,
+          animation: "fadeIn 0.8s ease-out 0.2s forwards",
+        }}>
+          Your Personal<br/>
+          <span style={{ color: COLORS.green }}>Passport</span>
+        </h1>
+        
+        <p style={{
+          fontSize: "clamp(16px, 2vw, 20px)",
+          color: COLORS.body,
+          marginBottom: 48,
+          maxWidth: 600,
+          margin: "0 auto 48px",
+          lineHeight: 1.6,
+          opacity: 0,
+          animation: "fadeIn 0.8s ease-out 0.4s forwards",
+        }}>
+          Join the FOFA ecosystem. Prove your loyalty.<br/>
+          Unlock your status as a true fan.
         </p>
-        <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
+        
+        <div style={{
+          display: "flex",
+          gap: 16,
+          justifyContent: "center",
+          flexWrap: "wrap",
+          opacity: 0,
+          animation: "fadeIn 0.8s ease-out 0.6s forwards",
+        }}>
           <button className="btn-primary" onClick={() => setCurrentView("register")}>
-            Create Your Passport
+            Create Account
           </button>
           <button className="btn-ghost" onClick={() => setCurrentView("login")}>
             Already a member?
@@ -374,39 +563,31 @@ function LandingView({ setCurrentView }) {
         </div>
       </div>
 
-      {/* FEATURE CARDS */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: 24,
-          marginTop: 80,
-        }}
-      >
+      {/* Feature Cards */}
+      <div className="grid-responsive" style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+        gap: 24,
+        marginTop: 100,
+      }}>
         {[
           {
-            icon: "🏟️",
-            title: "Match Attendance",
-            description: "Check in at matches and earn stamps that prove you were there. 50 points per match.",
-            color: COLORS.green,
+            title: "Proof of Loyalty",
+            description: "Score across 6 dimensions: engagement, passion, knowledge, consistency, community, and growth.",
+            icon: "⚽",
+            delay: 0.8,
           },
           {
-            icon: "👕",
-            title: "Merch & Gear",
-            description: "Every purchase recorded. Build your collection badge. 30 points per purchase.",
-            color: COLORS.gold,
+            title: "Fan Levels",
+            description: "From Apprentice to Legend. Track your journey and unlock exclusive benefits as you rise.",
+            icon: "🏆",
+            delay: 1.0,
           },
           {
-            icon: "📱",
-            title: "Social Engagement",
-            description: "Likes, retweets, comments — your digital support counts. 10 points per action.",
-            color: COLORS.teal,
-          },
-          {
-            icon: "🔗",
-            title: "On-Chain Identity",
-            description: "Your passport lives on Ethereum. Portable, verifiable, truly yours.",
-            color: COLORS.green,
+            title: "Club Partnerships",
+            description: "Connected with clubs worldwide. Your loyalty data travels with you across the ecosystem.",
+            icon: "🌍",
+            delay: 1.2,
           },
         ].map((card, i) => (
           <div
@@ -414,16 +595,42 @@ function LandingView({ setCurrentView }) {
             style={{
               background: COLORS.bgSoft,
               border: `1px solid ${COLORS.hairline}`,
-              padding: 28,
+              padding: 32,
               borderRadius: 4,
               textAlign: "center",
+              transition: "all 0.3s ease",
+              cursor: "default",
+              opacity: 0,
+              animation: `fadeIn 0.6s ease-out ${card.delay}s forwards`,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = "translateY(-4px)";
+              e.currentTarget.style.borderColor = COLORS.green;
+              e.currentTarget.style.boxShadow = `0 16px 48px ${COLORS.greenGlow}`;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "translateY(0)";
+              e.currentTarget.style.borderColor = COLORS.hairline;
+              e.currentTarget.style.boxShadow = "none";
             }}
           >
-            <div style={{ fontSize: 40, marginBottom: 12 }}>{card.icon}</div>
-            <h3 style={{ color: card.color, marginBottom: 8, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700 }}>
+            <div style={{ fontSize: 56, marginBottom: 20 }}>{card.icon}</div>
+            <h3 style={{
+              color: "#F2F5EE",
+              marginBottom: 12,
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontSize: 24,
+              fontWeight: 700,
+              letterSpacing: "0.02em",
+            }}>
               {card.title}
             </h3>
-            <p style={{ color: COLORS.body, opacity: 0.8, lineHeight: 1.5, fontSize: 15, margin: 0 }}>
+            <p style={{
+              color: COLORS.body,
+              opacity: 0.75,
+              lineHeight: 1.6,
+              fontSize: 15,
+            }}>
               {card.description}
             </p>
           </div>
@@ -434,67 +641,303 @@ function LandingView({ setCurrentView }) {
 }
 
 // ============================================================================
-// AUTH FORM
+// AUTH FORM (LOGIN / REGISTER)
 // ============================================================================
 
-function AuthForm({ type, onSubmit, loading, onSwitchView }) {
+function AuthForm({ type, onSuccess, onError, onSwitchView }) {
+  const [formData, setFormData] = useState({
+    email: "",
+    password: "",
+    username: "",
+    display_name: "",
+    favorite_club: "",
+  });
+  const [errors, setErrors] = useState({});
+  const [touched, setTouched] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Validation
+  function validate(field, value) {
+    const newErrors = { ...errors };
+    
+    if (field === "email" || (field === "all" && type === "login")) {
+      const val = field === "all" ? formData.email : value;
+      if (!val) newErrors.email = "Email is required";
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) newErrors.email = "Invalid email format";
+      else delete newErrors.email;
+    }
+    
+    if (field === "password" || field === "all") {
+      const val = field === "all" ? formData.password : value;
+      if (!val) newErrors.password = "Password is required";
+      else if (type === "register" && val.length < 6) newErrors.password = "Minimum 6 characters";
+      else delete newErrors.password;
+    }
+    
+    if (type === "register") {
+      if (field === "username" || field === "all") {
+        const val = field === "all" ? formData.username : value;
+        if (!val) newErrors.username = "Username is required";
+        else if (val.length < 3) newErrors.username = "Minimum 3 characters";
+        else if (!/^[a-zA-Z0-9_]+$/.test(val)) newErrors.username = "Letters, numbers, underscores only";
+        else delete newErrors.username;
+      }
+      
+      if (field === "display_name" || field === "all") {
+        const val = field === "all" ? formData.display_name : value;
+        if (!val) newErrors.display_name = "Display name is required";
+        else delete newErrors.display_name;
+      }
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  }
+
+  function handleChange(field, value) {
+    setFormData({ ...formData, [field]: value });
+    if (touched[field]) {
+      validate(field, value);
+    }
+  }
+
+  function handleBlur(field) {
+    setTouched({ ...touched, [field]: true });
+    validate(field, formData[field]);
+  }
+
+  // Password strength
+  function getPasswordStrength(password) {
+    if (!password) return { level: 0, label: "" };
+    let score = 0;
+    if (password.length >= 6) score++;
+    if (password.length >= 10) score++;
+    if (/[A-Z]/.test(password)) score++;
+    if (/[0-9]/.test(password)) score++;
+    if (/[^A-Za-z0-9]/.test(password)) score++;
+    
+    const levels = [
+      { level: 1, label: "Weak", color: COLORS.red },
+      { level: 2, label: "Fair", color: "#FF9F43" },
+      { level: 3, label: "Good", color: COLORS.gold },
+      { level: 4, label: "Strong", color: COLORS.green },
+      { level: 5, label: "Excellent", color: COLORS.green },
+    ];
+    return levels[Math.min(score - 1, 4)] || levels[0];
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    
+    // Mark all as touched
+    const allTouched = {};
+    Object.keys(formData).forEach(k => { allTouched[k] = true; });
+    setTouched(allTouched);
+    
+    if (!validate("all")) {
+      onError("Please fix the errors above");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const endpoint = type === "login" ? "/auth/login" : "/auth/register";
+      const body = type === "login"
+        ? { email: formData.email, password: formData.password }
+        : formData;
+
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Something went wrong");
+      }
+
+      onSuccess(data.token, data.user);
+    } catch (err) {
+      let message = err.message;
+      if (message.includes("already exists")) {
+        message = "This email or username is already taken. Try logging in instead?";
+      } else if (message.includes("Invalid")) {
+        message = "Incorrect email or password. Please try again.";
+      }
+      onError(message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const passwordStrength = type === "register" ? getPasswordStrength(formData.password) : null;
+
   return (
-    <div style={{ maxWidth: 500, margin: "0 auto" }}>
-      <h2
-        style={{
-          textAlign: "center",
-          marginBottom: 40,
-          color: COLORS.green,
+    <div style={{ maxWidth: 460, margin: "0 auto", padding: "40px 0" }} className="slide-up">
+      <div style={{ textAlign: "center", marginBottom: 40 }}>
+        <div style={{
+          fontSize: 11,
+          fontFamily: "'DM Mono', monospace",
+          color: COLORS.gold,
+          letterSpacing: "0.25em",
+          marginBottom: 16,
+        }}>
+          — {type === "login" ? "WELCOME BACK" : "JOIN THE ECOSYSTEM"}
+        </div>
+        <h2 style={{
+          color: "#F2F5EE",
           fontFamily: "'Barlow Condensed', sans-serif",
-          fontSize: 36,
+          fontSize: "clamp(36px, 7vw, 56px)",
           fontWeight: 900,
-        }}
-      >
-        {type === "login" ? "Sign In" : "Create Your Passport"}
-      </h2>
+          margin: 0,
+          letterSpacing: "-0.02em",
+        }}>
+          {type === "login" ? "Sign In" : <>Join <span style={{color: COLORS.green}}>FOFA</span></>}
+        </h2>
+      </div>
 
-      {type === "register" && (
-        <p style={{ textAlign: "center", marginBottom: 32, fontSize: 14, color: COLORS.teal, fontFamily: "'DM Mono', monospace" }}>
-          An Ethereum wallet & DID will be generated for you automatically
-        </p>
-      )}
-
-      <form onSubmit={onSubmit}>
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         {type === "register" && (
           <>
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: "block", marginBottom: 8, fontSize: 14, opacity: 0.8 }}>Display Name</label>
-              <input type="text" name="display_name" placeholder="Your name" required style={{ width: "100%" }} />
-            </div>
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: "block", marginBottom: 8, fontSize: 14, opacity: 0.8 }}>Username</label>
-              <input type="text" name="username" placeholder="footy_fan" required style={{ width: "100%" }} />
-            </div>
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: "block", marginBottom: 8, fontSize: 14, opacity: 0.8 }}>Favorite Club</label>
-              <input type="text" name="favorite_club" placeholder="Manchester United" style={{ width: "100%" }} />
-            </div>
+            <FormField
+              label="Display Name"
+              name="display_name"
+              value={formData.display_name}
+              onChange={(v) => handleChange("display_name", v)}
+              onBlur={() => handleBlur("display_name")}
+              error={touched.display_name && errors.display_name}
+              placeholder="Your name"
+              autoFocus
+            />
+            
+            <FormField
+              label="Username"
+              name="username"
+              value={formData.username}
+              onChange={(v) => handleChange("username", v.toLowerCase())}
+              onBlur={() => handleBlur("username")}
+              error={touched.username && errors.username}
+              placeholder="footy_fan_2024"
+              hint="Letters, numbers, and underscores only"
+            />
+            
+            <FormField
+              label="Favorite Club"
+              name="favorite_club"
+              value={formData.favorite_club}
+              onChange={(v) => handleChange("favorite_club", v)}
+              placeholder="Manchester United"
+              hint="Optional"
+            />
           </>
         )}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "block", marginBottom: 8, fontSize: 14, opacity: 0.8 }}>Email</label>
-          <input type="email" name="email" placeholder="you@example.com" required style={{ width: "100%" }} />
+
+        <FormField
+          label="Email"
+          type="email"
+          name="email"
+          value={formData.email}
+          onChange={(v) => handleChange("email", v)}
+          onBlur={() => handleBlur("email")}
+          error={touched.email && errors.email}
+          placeholder="you@example.com"
+          autoFocus={type === "login"}
+        />
+
+        <div>
+          <FormField
+            label="Password"
+            type={showPassword ? "text" : "password"}
+            name="password"
+            value={formData.password}
+            onChange={(v) => handleChange("password", v)}
+            onBlur={() => handleBlur("password")}
+            error={touched.password && errors.password}
+            placeholder="••••••••"
+            suffix={
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: COLORS.body,
+                  opacity: 0.6,
+                  cursor: "pointer",
+                  padding: 8,
+                  fontSize: 12,
+                }}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            }
+          />
+          
+          {/* Password strength indicator */}
+          {type === "register" && formData.password && (
+            <div style={{ marginTop: 8, opacity: 0, animation: "fadeIn 0.3s forwards" }}>
+              <div style={{
+                display: "flex",
+                gap: 4,
+                marginBottom: 6,
+              }}>
+                {[1, 2, 3, 4].map(i => (
+                  <div key={i} style={{
+                    flex: 1,
+                    height: 3,
+                    background: passwordStrength.level >= i ? passwordStrength.color : COLORS.hairline,
+                    borderRadius: 2,
+                    transition: "background 0.3s",
+                  }} />
+                ))}
+              </div>
+              <div style={{
+                fontSize: 11,
+                fontFamily: "'DM Mono', monospace",
+                color: passwordStrength.color,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+              }}>
+                {passwordStrength.label}
+              </div>
+            </div>
+          )}
         </div>
-        <div style={{ marginBottom: 32 }}>
-          <label style={{ display: "block", marginBottom: 8, fontSize: 14, opacity: 0.8 }}>Password</label>
-          <input type="password" name="password" placeholder="••••••••" required style={{ width: "100%" }} />
-        </div>
-        <button type="submit" className="btn-primary" disabled={loading} style={{ width: "100%", marginBottom: 16 }}>
-          {loading ? "Loading..." : type === "login" ? "Sign In" : "Create Passport"}
+
+        <button
+          type="submit"
+          className="btn-primary"
+          disabled={loading}
+          style={{
+            width: "100%",
+            padding: "16px",
+            marginTop: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+          }}
+        >
+          {loading ? (
+            <>
+              <LoadingSpinner size={16} color={COLORS.bg} />
+              <span>{type === "login" ? "Signing in..." : "Creating account..."}</span>
+            </>
+          ) : (
+            type === "login" ? "Sign In" : "Create Account"
+          )}
         </button>
       </form>
-      <div style={{ textAlign: "center" }}>
-        <button
-          className="btn-ghost"
-          onClick={onSwitchView}
-          style={{ background: "none", border: "none", color: COLORS.green, cursor: "pointer" }}
-        >
-          {type === "login" ? "Don't have an account? Register here" : "Already have an account? Sign in here"}
+
+      <div style={{ textAlign: "center", marginTop: 32, paddingTop: 24, borderTop: `1px solid ${COLORS.hairline}` }}>
+        <button className="btn-text" onClick={onSwitchView}>
+          {type === "login"
+            ? "Don't have an account? Sign up →"
+            : "Already have an account? Sign in →"}
         </button>
       </div>
     </div>
@@ -502,102 +945,239 @@ function AuthForm({ type, onSubmit, loading, onSwitchView }) {
 }
 
 // ============================================================================
-// PORTAL DASHBOARD
+// FORM FIELD
 // ============================================================================
 
-function PortalDashboard({ user, passport, token, onRefresh, apiUrl }) {
-  const [activeTab, setActiveTab] = useState("passport");
+function FormField({ label, name, value, onChange, onBlur, error, placeholder, type = "text", hint, autoFocus, suffix }) {
+  return (
+    <div>
+      <label style={{
+        display: "block",
+        marginBottom: 8,
+        fontSize: 11,
+        fontFamily: "'DM Mono', monospace",
+        color: COLORS.body,
+        opacity: 0.7,
+        letterSpacing: "0.1em",
+        textTransform: "uppercase",
+      }}>
+        {label}
+      </label>
+      <div style={{ position: "relative" }}>
+        <input
+          type={type}
+          name={name}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
+          placeholder={placeholder}
+          autoFocus={autoFocus}
+          className={error ? "error" : ""}
+          style={{ paddingRight: suffix ? 80 : 16 }}
+        />
+        {suffix && (
+          <div style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)" }}>
+            {suffix}
+          </div>
+        )}
+      </div>
+      {error && (
+        <div style={{
+          marginTop: 6,
+          fontSize: 12,
+          color: COLORS.red,
+          fontFamily: "'DM Mono', monospace",
+          letterSpacing: "0.03em",
+          opacity: 0,
+          animation: "fadeIn 0.2s forwards",
+        }}>
+          ⚠ {error}
+        </div>
+      )}
+      {hint && !error && (
+        <div style={{
+          marginTop: 6,
+          fontSize: 12,
+          color: COLORS.body,
+          opacity: 0.5,
+          fontFamily: "'DM Mono', monospace",
+        }}>
+          {hint}
+        </div>
+      )}
+    </div>
+  );
+}
 
-  const TAB_LABELS = {
-    passport: "Passport",
-    record: "Record Activity",
-    social: "X Sync",
-    history: "History",
-    profile: "Profile",
-  };
+// ============================================================================
+// DASHBOARD
+// ============================================================================
+
+function Dashboard({ user, token, onProfileUpdate, showToast }) {
+  const [activeTab, setActiveTab] = useState("passport");
+  const [loyaltyData, setLoyaltyData] = useState(null);
+  const [activities, setActivities] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchLoyaltyData();
+  }, []);
+
+  async function fetchLoyaltyData() {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/loyalty/scores`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      setLoyaltyData(data.scores);
+      setActivities(data.recent_activities || []);
+    } catch (err) {
+      console.error(err);
+      showToast("Could not load loyalty data", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const tabs = [
+    { id: "passport", label: "Passport" },
+    { id: "activities", label: "Record Activity" },
+    { id: "history", label: "History" },
+    { id: "profile", label: "Profile" },
+  ];
 
   return (
-    <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-      {/* TABS */}
-      <div style={{ display: "flex", gap: 24, marginBottom: 40, borderBottom: `1px solid ${COLORS.hairline}`, paddingBottom: 16, flexWrap: "wrap" }}>
-        {Object.keys(TAB_LABELS).map((tab) => (
+    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "40px 0" }}>
+      {/* Tabs */}
+      <div className="tabs-container" style={{
+        display: "flex",
+        gap: 8,
+        marginBottom: 40,
+        borderBottom: `1px solid ${COLORS.hairline}`,
+        paddingBottom: 0,
+      }}>
+        {tabs.map((tab) => (
           <button
-            key={tab}
-            className="btn-ghost"
-            onClick={() => setActiveTab(tab)}
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
             style={{
-              background: activeTab === tab ? `${COLORS.green}20` : "transparent",
-              borderColor: activeTab === tab ? COLORS.green : "transparent",
-              borderBottom: activeTab === tab ? `2px solid ${COLORS.green}` : "none",
-              borderLeft: "none",
-              borderRight: "none",
-              borderTop: "none",
-              textTransform: "none",
+              background: "transparent",
+              border: "none",
+              color: activeTab === tab.id ? COLORS.green : COLORS.body,
+              opacity: activeTab === tab.id ? 1 : 0.6,
+              padding: "12px 20px",
+              fontFamily: "'DM Mono', monospace",
+              fontSize: 12,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+              borderBottom: `2px solid ${activeTab === tab.id ? COLORS.green : "transparent"}`,
+              marginBottom: "-1px",
+              transition: "all 0.2s",
+              whiteSpace: "nowrap",
             }}
           >
-            {TAB_LABELS[tab]}
+            {tab.label}
           </button>
         ))}
       </div>
 
-      {activeTab === "passport" && <PassportCard user={user} passport={passport} />}
-      {activeTab === "record" && <RecordInteraction token={token} onComplete={onRefresh} />}
-      {activeTab === "social" && <SocialSync token={token} apiUrl={apiUrl} onComplete={onRefresh} />}
-      {activeTab === "history" && <InteractionHistory passport={passport} />}
-      {activeTab === "profile" && <ProfileTab user={user} token={token} onUpdate={onRefresh} />}
+      {/* Tab content with fade */}
+      <div key={activeTab} className="fade-in">
+        {activeTab === "passport" && (
+          <PassportTab user={user} loyaltyData={loyaltyData} loading={loading} />
+        )}
+        {activeTab === "activities" && (
+          <ActivitiesTab
+            token={token}
+            onActivityLogged={() => { fetchLoyaltyData(); onProfileUpdate(); }}
+            showToast={showToast}
+          />
+        )}
+        {activeTab === "history" && (
+          <HistoryTab token={token} activities={activities} showToast={showToast} />
+        )}
+        {activeTab === "profile" && (
+          <ProfileTab user={user} token={token} onUpdate={onProfileUpdate} showToast={showToast} />
+        )}
+      </div>
     </div>
   );
 }
 
 // ============================================================================
-// PASSPORT CARD — the visual "passport" with DID + stamps
+// PASSPORT TAB
 // ============================================================================
 
-function PassportCard({ user, passport }) {
-  const badges = passport || { match_attendance: 0, merch_purchases: 0, social_media: 0, interactions: [] };
+function PassportTab({ user, loyaltyData, loading }) {
+  if (loading || !loyaltyData) {
+    return <PassportSkeleton />;
+  }
+
+  const totalScore = loyaltyData.total_score;
+  const levels = [
+    { name: "apprentice", label: "Apprentice", min: 0, max: 99 },
+    { name: "supporter", label: "Supporter", min: 100, max: 499 },
+    { name: "devotee", label: "Devotee", min: 500, max: 1499 },
+    { name: "veteran", label: "Veteran", min: 1500, max: 2999 },
+    { name: "master", label: "Master", min: 3000, max: 4999 },
+    { name: "legend", label: "Legend", min: 5000, max: 999999 },
+  ];
+  const currentLevel = levels.find(l => totalScore >= l.min && totalScore <= l.max) || levels[0];
+  const nextLevel = levels[levels.indexOf(currentLevel) + 1];
+  const progressInLevel = nextLevel
+    ? ((totalScore - currentLevel.min) / (nextLevel.min - currentLevel.min)) * 100
+    : 100;
+
+  const initials = user.display_name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
 
   return (
-    <div>
-      {/* PASSPORT VISUAL */}
-      <div
-        className="did-glow"
-        style={{
-          maxWidth: 700,
-          margin: "0 auto 48px",
-          background: `linear-gradient(135deg, ${COLORS.bgSoft} 0%, #101810 50%, ${COLORS.bgSoft} 100%)`,
-          border: `2px solid ${COLORS.green}40`,
-          borderRadius: 12,
-          overflow: "hidden",
-          position: "relative",
-        }}
-      >
-        {/* Passport Header */}
-        <div
-          style={{
-            background: `linear-gradient(90deg, ${COLORS.green}15, ${COLORS.green}08)`,
-            padding: "24px 32px",
-            borderBottom: `1px solid ${COLORS.green}30`,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* PASSPORT CARD */}
+      <div style={{
+        background: `linear-gradient(135deg, ${COLORS.bgCard} 0%, ${COLORS.bgSoft} 100%)`,
+        border: `1px solid ${COLORS.green}`,
+        boxShadow: `0 0 60px ${COLORS.greenGlow}, inset 0 1px 0 rgba(26, 255, 110, 0.1)`,
+        borderRadius: 8,
+        overflow: "hidden",
+        position: "relative",
+      }}>
+        {/* Grain overlay */}
+        <div style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.9'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E")`,
+          opacity: 0.03,
+          pointerEvents: "none",
+        }} />
+
+        {/* Header strip */}
+        <div style={{
+          padding: "24px 32px",
+          borderBottom: `1px solid ${COLORS.green}30`,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          flexWrap: "wrap",
+          gap: 16,
+        }}>
           <div>
             <div style={{
+              fontSize: 24,
               fontFamily: "'Barlow Condensed', sans-serif",
               fontWeight: 900,
-              fontSize: 28,
               color: COLORS.green,
-              letterSpacing: "0.05em",
+              letterSpacing: "0.1em",
             }}>
               FOFA PASSPORT
             </div>
             <div style={{
-              fontFamily: "'DM Mono', monospace",
               fontSize: 10,
+              fontFamily: "'DM Mono', monospace",
               color: COLORS.body,
               opacity: 0.6,
-              letterSpacing: "0.3em",
+              letterSpacing: "0.2em",
               marginTop: 4,
             }}>
               DECENTRALISED FAN IDENTITY
@@ -606,552 +1186,462 @@ function PassportCard({ user, passport }) {
           <div style={{
             width: 56,
             height: 56,
-            border: `2px solid ${COLORS.green}`,
             borderRadius: "50%",
+            background: COLORS.greenGlow,
+            border: `2px solid ${COLORS.green}`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 24,
-            color: COLORS.green,
+            fontSize: 22,
             fontFamily: "'Barlow Condensed', sans-serif",
             fontWeight: 900,
+            color: COLORS.green,
           }}>
-            {user.display_name.split(" ").map(n => n[0]).join("").slice(0, 2)}
+            {initials}
           </div>
         </div>
 
-        {/* Passport Body */}
-        <div style={{ padding: "32px" }}>
-          {/* User Info Row */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginBottom: 32 }}>
+        {/* Main content */}
+        <div className="dashboard-header" style={{ padding: "32px" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 32,
+            marginBottom: 32,
+          }} className="grid-responsive">
             <div>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: COLORS.body, opacity: 0.5, letterSpacing: "0.2em", marginBottom: 6 }}>
+              <div style={{
+                fontSize: 10,
+                fontFamily: "'DM Mono', monospace",
+                color: COLORS.body,
+                opacity: 0.6,
+                letterSpacing: "0.2em",
+                marginBottom: 6,
+              }}>
                 HOLDER
               </div>
-              <div style={{ color: "#F2F5EE", fontSize: 22, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700 }}>
+              <div style={{
+                fontSize: 28,
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontWeight: 900,
+                color: "#F2F5EE",
+                letterSpacing: "-0.01em",
+              }}>
                 {user.display_name}
               </div>
             </div>
             <div>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: COLORS.body, opacity: 0.5, letterSpacing: "0.2em", marginBottom: 6 }}>
+              <div style={{
+                fontSize: 10,
+                fontFamily: "'DM Mono', monospace",
+                color: COLORS.body,
+                opacity: 0.6,
+                letterSpacing: "0.2em",
+                marginBottom: 6,
+              }}>
                 CLUB ALLEGIANCE
               </div>
-              <div style={{ color: COLORS.gold, fontSize: 18, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700 }}>
-                {user.favorite_club || "Not set"}
+              <div style={{
+                fontSize: 24,
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontWeight: 700,
+                color: COLORS.gold,
+                letterSpacing: "0.02em",
+              }}>
+                {user.favorite_club || "—"}
               </div>
             </div>
           </div>
 
-          {/* DID */}
-          <div style={{ marginBottom: 32 }}>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: COLORS.body, opacity: 0.5, letterSpacing: "0.2em", marginBottom: 6 }}>
-              DECENTRALISED IDENTIFIER (DID)
-            </div>
-            <div style={{
-              fontFamily: "'DM Mono', monospace",
-              fontSize: 13,
-              color: COLORS.teal,
-              background: `${COLORS.bg}`,
-              padding: "10px 14px",
-              borderRadius: 4,
-              border: `1px solid ${COLORS.hairline}`,
-              wordBreak: "break-all",
-            }}>
-              {user.did || "did:fofa:pending..."}
-            </div>
-          </div>
-
-          {/* Wallet Address */}
-          <div style={{ marginBottom: 32 }}>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: COLORS.body, opacity: 0.5, letterSpacing: "0.2em", marginBottom: 6 }}>
-              ETHEREUM WALLET
-            </div>
-            <div style={{
-              fontFamily: "'DM Mono', monospace",
-              fontSize: 12,
-              color: COLORS.body,
-              opacity: 0.7,
-              wordBreak: "break-all",
-            }}>
-              {user.wallet_address || "0x..."}
-            </div>
-          </div>
-
-          {/* STAMPS / BADGES */}
-          <div style={{ marginBottom: 24 }}>
-            <div style={{
-              fontFamily: "'DM Mono', monospace",
-              fontSize: 9,
-              color: COLORS.body,
-              opacity: 0.5,
-              letterSpacing: "0.2em",
-              marginBottom: 16,
-            }}>
-              INTERACTION STAMPS
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
-              <StampBadge
-                icon="🏟️"
-                label="Matches"
-                count={badges.match_attendance}
-                color={COLORS.green}
-                points={badges.match_attendance * 50}
-              />
-              <StampBadge
-                icon="👕"
-                label="Merch"
-                count={badges.merch_purchases}
-                color={COLORS.gold}
-                points={badges.merch_purchases * 30}
-              />
-              <StampBadge
-                icon="📱"
-                label="Social"
-                count={badges.social_media}
-                color={COLORS.teal}
-                points={badges.social_media * 10}
-              />
-            </div>
-          </div>
-
-          {/* Footer */}
+          {/* Level and progress */}
           <div style={{
-            borderTop: `1px solid ${COLORS.hairline}`,
-            paddingTop: 16,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
+            background: COLORS.bg,
+            border: `1px solid ${COLORS.hairline}`,
+            borderRadius: 4,
+            padding: 24,
+            marginBottom: 24,
           }}>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: COLORS.body, opacity: 0.4 }}>
-              Member since {new Date(user.created_at).toLocaleDateString()}
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "baseline",
+              marginBottom: 16,
+              flexWrap: "wrap",
+              gap: 8,
+            }}>
+              <div>
+                <div style={{
+                  fontSize: 10,
+                  fontFamily: "'DM Mono', monospace",
+                  color: COLORS.body,
+                  opacity: 0.6,
+                  letterSpacing: "0.2em",
+                  marginBottom: 4,
+                }}>
+                  CURRENT LEVEL
+                </div>
+                <div style={{
+                  fontSize: 32,
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontWeight: 900,
+                  color: COLORS.green,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.02em",
+                }}>
+                  {currentLevel.label}
+                </div>
+              </div>
+              <div style={{
+                fontFamily: "'DM Mono', monospace",
+                fontSize: 14,
+                color: COLORS.body,
+                opacity: 0.8,
+              }}>
+                {Math.round(totalScore)} {nextLevel && `/ ${nextLevel.min}`}
+              </div>
             </div>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: COLORS.body, opacity: 0.4 }}>
-              {badges.total_interactions || (badges.match_attendance + badges.merch_purchases + badges.social_media)} interactions recorded
+            
+            <div style={{
+              height: 6,
+              background: COLORS.bgCard,
+              borderRadius: 3,
+              overflow: "hidden",
+              border: `1px solid ${COLORS.hairline}`,
+            }}>
+              <div style={{
+                height: "100%",
+                width: `${progressInLevel}%`,
+                background: `linear-gradient(90deg, ${COLORS.green}, ${COLORS.teal})`,
+                transition: "width 1s cubic-bezier(0.4, 0, 0.2, 1)",
+                boxShadow: `0 0 12px ${COLORS.green}`,
+              }} />
             </div>
+            
+            {nextLevel && (
+              <div style={{
+                marginTop: 12,
+                fontSize: 11,
+                fontFamily: "'DM Mono', monospace",
+                color: COLORS.body,
+                opacity: 0.5,
+                letterSpacing: "0.1em",
+              }}>
+                {nextLevel.min - totalScore} POINTS TO {nextLevel.label.toUpperCase()}
+              </div>
+            )}
           </div>
-        </div>
-      </div>
 
-      {/* Recent Interactions */}
-      {passport?.interactions?.length > 0 && (
-        <div style={{ maxWidth: 700, margin: "0 auto" }}>
-          <h3 style={{
-            fontFamily: "'Barlow Condensed', sans-serif",
-            fontSize: 20,
-            fontWeight: 700,
-            color: "#F2F5EE",
-            marginBottom: 16,
+          {/* Dimension scores */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+            gap: 12,
           }}>
-            Recent On-Chain Activity
-          </h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {passport.interactions.slice(0, 8).map((ix, i) => (
+            {[
+              { label: "Engagement", value: loyaltyData.engagement_score, icon: "◆" },
+              { label: "Passion", value: loyaltyData.passion_score, icon: "♦" },
+              { label: "Knowledge", value: loyaltyData.knowledge_score, icon: "◇" },
+              { label: "Consistency", value: loyaltyData.consistency_score, icon: "◈" },
+              { label: "Community", value: loyaltyData.community_score, icon: "⬡" },
+              { label: "Growth", value: loyaltyData.growth_score, icon: "△" },
+            ].map((dim, i) => (
               <div
                 key={i}
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "12px 16px",
-                  background: COLORS.bgSoft,
+                  background: COLORS.bg,
+                  padding: "16px 14px",
                   borderRadius: 4,
                   border: `1px solid ${COLORS.hairline}`,
+                  textAlign: "center",
+                  transition: "all 0.2s",
+                  opacity: 0,
+                  animation: `fadeIn 0.4s ease-out ${i * 0.08}s forwards`,
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.borderColor = COLORS.green;
+                  e.currentTarget.style.transform = "translateY(-2px)";
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = COLORS.hairline;
+                  e.currentTarget.style.transform = "translateY(0)";
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <span style={{ fontSize: 18 }}>
-                    {ix.interaction_type === "match_attendance" ? "🏟️" :
-                     ix.interaction_type === "merch_purchase" ? "👕" : "📱"}
-                  </span>
-                  <div>
-                    <div style={{ color: "#F2F5EE", fontSize: 14 }}>
-                      {formatInteractionLabel(ix.interaction_type, ix.metadata)}
-                    </div>
-                    <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: COLORS.body, opacity: 0.5, marginTop: 2 }}>
-                      {ix.tx_hash ? `tx: ${ix.tx_hash.slice(0, 10)}...${ix.tx_hash.slice(-6)}` : "pending"}
-                    </div>
-                  </div>
+                <div style={{ fontSize: 14, color: COLORS.green, marginBottom: 4 }}>{dim.icon}</div>
+                <div style={{
+                  fontSize: 10,
+                  fontFamily: "'DM Mono', monospace",
+                  opacity: 0.6,
+                  marginBottom: 6,
+                  letterSpacing: "0.15em",
+                  textTransform: "uppercase",
+                }}>
+                  {dim.label}
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ color: COLORS.green, fontFamily: "'DM Mono', monospace", fontSize: 13 }}>
-                    +{ix.points}
-                  </div>
-                  <div style={{ fontSize: 10, opacity: 0.5 }}>
-                    {new Date(ix.created_at).toLocaleDateString()}
-                  </div>
+                <div style={{
+                  fontSize: 22,
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  color: "#F2F5EE",
+                  fontWeight: 700,
+                }}>
+                  {Math.round(dim.value)}
                 </div>
               </div>
             ))}
           </div>
         </div>
-      )}
-    </div>
-  );
-}
 
-// ============================================================================
-// STAMP BADGE component
-// ============================================================================
-
-function StampBadge({ icon, label, count, color, points }) {
-  const hasStamps = count > 0;
-
-  return (
-    <div
-      className={hasStamps ? "stamp-badge" : ""}
-      style={{
-        background: hasStamps ? `${color}15` : COLORS.bg,
-        border: `2px solid ${hasStamps ? color : COLORS.hairline}`,
-        borderRadius: 8,
-        padding: "20px 16px",
-        textAlign: "center",
-        position: "relative",
-        overflow: "hidden",
-        opacity: hasStamps ? 1 : 0.4,
-      }}
-    >
-      {hasStamps && (
+        {/* Footer strip */}
         <div style={{
-          position: "absolute",
-          top: 8,
-          right: 8,
-          background: color,
-          color: COLORS.bg,
-          fontFamily: "'DM Mono', monospace",
+          padding: "16px 32px",
+          borderTop: `1px solid ${COLORS.green}30`,
+          background: COLORS.bg,
+          display: "flex",
+          justifyContent: "space-between",
           fontSize: 10,
-          fontWeight: 700,
-          padding: "2px 6px",
-          borderRadius: 10,
+          fontFamily: "'DM Mono', monospace",
+          color: COLORS.body,
+          opacity: 0.6,
+          letterSpacing: "0.15em",
+          flexWrap: "wrap",
+          gap: 8,
         }}>
-          x{count}
+          <div>MEMBER SINCE {new Date(user.created_at).toLocaleDateString("en-GB")}</div>
+          <div>@{user.username}</div>
         </div>
-      )}
-      <div style={{ fontSize: 32, marginBottom: 8 }}>{icon}</div>
-      <div style={{
-        fontFamily: "'Barlow Condensed', sans-serif",
-        fontWeight: 700,
-        fontSize: 16,
-        color: hasStamps ? "#F2F5EE" : COLORS.body,
-        marginBottom: 4,
-      }}>
-        {label}
-      </div>
-      <div style={{
-        fontFamily: "'DM Mono', monospace",
-        fontSize: 11,
-        color: hasStamps ? color : COLORS.body,
-        opacity: hasStamps ? 1 : 0.5,
-      }}>
-        {hasStamps ? `${points} pts` : "No stamps yet"}
       </div>
     </div>
   );
 }
 
 // ============================================================================
-// RECORD INTERACTION
+// PASSPORT SKELETON
 // ============================================================================
 
-function RecordInteraction({ token, onComplete }) {
-  const [type, setType] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+function PassportSkeleton() {
+  return (
+    <div style={{
+      background: COLORS.bgCard,
+      border: `1px solid ${COLORS.hairline}`,
+      borderRadius: 8,
+      padding: 32,
+    }}>
+      <div style={{ marginBottom: 32 }}>
+        <Skeleton width={200} height={24} style={{ marginBottom: 12 }} />
+        <Skeleton width={150} height={12} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginBottom: 32 }}>
+        <div>
+          <Skeleton width={80} height={10} style={{ marginBottom: 8 }} />
+          <Skeleton width="80%" height={28} />
+        </div>
+        <div>
+          <Skeleton width={100} height={10} style={{ marginBottom: 8 }} />
+          <Skeleton width="60%" height={24} />
+        </div>
+      </div>
+      <Skeleton height={80} style={{ marginBottom: 24 }} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
+        {[1,2,3,4,5,6].map(i => <Skeleton key={i} height={80} />)}
+      </div>
+    </div>
+  );
+}
 
-  async function submitInteraction(interaction_type, metadata) {
+// ============================================================================
+// ACTIVITIES TAB (LOG NEW ACTIVITY)
+// ============================================================================
+
+function ActivitiesTab({ token, onActivityLogged, showToast }) {
+  const [activityType, setActivityType] = useState("engagement");
+  const [points, setPoints] = useState(10);
+  const [description, setDescription] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const activityTypes = [
+    { value: "engagement", label: "Engagement", desc: "Watched a match, attended a game" },
+    { value: "passion", label: "Passion", desc: "Expressed support, wore club colors" },
+    { value: "knowledge", label: "Knowledge", desc: "Quiz, trivia, match analysis" },
+    { value: "consistency", label: "Consistency", desc: "Regular check-ins, daily engagement" },
+    { value: "community", label: "Community", desc: "Helped fellow fans, moderated discussions" },
+    { value: "growth", label: "Growth", desc: "Brought new fans, expanded the community" },
+  ];
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!description.trim()) {
+      showToast("Please describe your activity", "error");
+      return;
+    }
+    
     setLoading(true);
-    setResult(null);
     try {
-      const response = await fetch(`${API_URL}/api/passport/interact`, {
+      const response = await fetch(`${API_URL}/loyalty/activity`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ interaction_type, metadata }),
+        body: JSON.stringify({ activity_type: activityType, description, points: parseInt(points) }),
       });
 
-      if (!response.ok) throw new Error("Failed to record interaction");
+      if (!response.ok) throw new Error("Failed to log activity");
 
-      const data = await response.json();
-      setResult(data);
-      onComplete();
+      setDescription("");
+      setPoints(10);
+      onActivityLogged();
+      showToast(`+${points} points added to ${activityType}! 🎉`, "success");
     } catch (err) {
-      console.error(err);
+      showToast("Failed to log activity. Try again.", "error");
     } finally {
       setLoading(false);
     }
   }
 
-  if (result) {
-    return (
-      <div style={{ maxWidth: 600, margin: "0 auto", textAlign: "center" }}>
-        <div style={{ fontSize: 56, marginBottom: 16 }}>
-          {result.interaction?.interaction_type === "match_attendance" ? "🏟️" :
-           result.interaction?.interaction_type === "merch_purchase" ? "👕" : "📱"}
-        </div>
-        <h2 style={{ color: COLORS.green, fontFamily: "'Barlow Condensed', sans-serif", marginBottom: 16 }}>
-          Interaction Recorded!
-        </h2>
-        <div style={{
-          background: COLORS.bgSoft,
-          border: `1px solid ${COLORS.hairline}`,
-          borderRadius: 8,
-          padding: 24,
-          marginBottom: 24,
-          textAlign: "left",
-        }}>
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: COLORS.body, opacity: 0.5, letterSpacing: "0.2em", marginBottom: 4 }}>
-              TRANSACTION HASH
-            </div>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: COLORS.teal, wordBreak: "break-all" }}>
-              {result.tx?.txHash}
-            </div>
-          </div>
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: COLORS.body, opacity: 0.5, letterSpacing: "0.2em", marginBottom: 4 }}>
-              BLOCK NUMBER
-            </div>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: COLORS.body }}>
-              #{result.tx?.blockNumber}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: COLORS.body, opacity: 0.5, letterSpacing: "0.2em", marginBottom: 4 }}>
-              POINTS EARNED
-            </div>
-            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 18, color: COLORS.green }}>
-              +{result.interaction?.points}
-            </div>
-          </div>
-        </div>
-        <button className="btn-primary" onClick={() => { setResult(null); setType(null); }}>
-          Record Another
-        </button>
-      </div>
-    );
-  }
-
-  if (!type) {
-    return (
-      <div style={{ maxWidth: 700, margin: "0 auto" }}>
+  return (
+    <div style={{ maxWidth: 700 }}>
+      <div style={{ marginBottom: 32 }}>
         <h2 style={{
-          fontFamily: "'Barlow Condensed', sans-serif",
-          fontSize: 28,
-          fontWeight: 900,
           color: "#F2F5EE",
-          marginBottom: 8,
-        }}>
-          Record an Interaction
-        </h2>
-        <p style={{ marginBottom: 32, opacity: 0.7 }}>
-          Choose the type of fan interaction to stamp on your passport.
-        </p>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 20 }}>
-          {[
-            {
-              type: "match_attendance",
-              icon: "🏟️",
-              title: "Match Attendance",
-              desc: "Record attending a live match",
-              points: 50,
-              color: COLORS.green,
-            },
-            {
-              type: "merch_purchase",
-              icon: "👕",
-              title: "Merch Purchase",
-              desc: "Log a merchandise purchase",
-              points: 30,
-              color: COLORS.gold,
-            },
-            {
-              type: "social_media",
-              icon: "📱",
-              title: "Social Media",
-              desc: "Like, retweet, or comment",
-              points: 10,
-              color: COLORS.teal,
-            },
-          ].map((item, i) => (
-            <button
-              key={i}
-              onClick={() => setType(item.type)}
-              style={{
-                background: COLORS.bgSoft,
-                border: `1px solid ${COLORS.hairline}`,
-                borderRadius: 8,
-                padding: 28,
-                textAlign: "center",
-                cursor: "pointer",
-                transition: "all 0.2s",
-                color: COLORS.body,
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = item.color;
-                e.currentTarget.style.transform = "translateY(-4px)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = COLORS.hairline;
-                e.currentTarget.style.transform = "translateY(0)";
-              }}
-            >
-              <div style={{ fontSize: 40, marginBottom: 12 }}>{item.icon}</div>
-              <div style={{
-                fontFamily: "'Barlow Condensed', sans-serif",
-                fontWeight: 700,
-                fontSize: 18,
-                color: "#F2F5EE",
-                marginBottom: 8,
-                textTransform: "none",
-                letterSpacing: 0,
-              }}>
-                {item.title}
-              </div>
-              <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 12, textTransform: "none", letterSpacing: 0 }}>
-                {item.desc}
-              </div>
-              <div style={{
-                fontFamily: "'DM Mono', monospace",
-                fontSize: 12,
-                color: item.color,
-              }}>
-                +{item.points} pts
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <InteractionForm
-      type={type}
-      loading={loading}
-      onSubmit={submitInteraction}
-      onBack={() => setType(null)}
-    />
-  );
-}
-
-// ============================================================================
-// INTERACTION FORM — specific fields per type
-// ============================================================================
-
-function InteractionForm({ type, loading, onSubmit, onBack }) {
-  const [formData, setFormData] = useState({});
-
-  function handleSubmit(e) {
-    e.preventDefault();
-    onSubmit(type, formData);
-  }
-
-  const config = {
-    match_attendance: {
-      icon: "🏟️",
-      title: "Match Attendance",
-      color: COLORS.green,
-      fields: [
-        { key: "match_name", label: "Match", placeholder: "e.g. Arsenal vs Chelsea", required: true },
-        { key: "venue", label: "Venue", placeholder: "e.g. Emirates Stadium" },
-        { key: "date", label: "Date", type: "date" },
-        { key: "competition", label: "Competition", placeholder: "e.g. Premier League" },
-      ],
-    },
-    merch_purchase: {
-      icon: "👕",
-      title: "Merchandise Purchase",
-      color: COLORS.gold,
-      fields: [
-        { key: "item_name", label: "Item", placeholder: "e.g. Home Kit 2025/26", required: true },
-        { key: "brand", label: "Brand", placeholder: "e.g. Nike" },
-        { key: "club", label: "Club / Team", placeholder: "e.g. Arsenal FC" },
-        { key: "category", label: "Category", placeholder: "e.g. Jersey, Scarf, Cap" },
-      ],
-    },
-    social_media: {
-      icon: "📱",
-      title: "Social Media Engagement",
-      color: COLORS.teal,
-      fields: [
-        { key: "action", label: "Action", type: "select", options: ["Like", "Retweet", "Comment", "Share", "Post"], required: true },
-        { key: "platform", label: "Platform", type: "select", options: ["X (Twitter)", "Instagram", "Facebook", "TikTok", "YouTube"] },
-        { key: "content_url", label: "Content URL", placeholder: "https://..." },
-        { key: "description", label: "Description", placeholder: "What did you engage with?" },
-      ],
-    },
-  };
-
-  const cfg = config[type];
-
-  return (
-    <div style={{ maxWidth: 500, margin: "0 auto" }}>
-      <button
-        onClick={onBack}
-        style={{
-          background: "none",
-          border: "none",
-          color: COLORS.body,
-          opacity: 0.6,
-          cursor: "pointer",
-          fontFamily: "'DM Mono', monospace",
-          fontSize: 12,
-          marginBottom: 24,
-          padding: 0,
-        }}
-      >
-        &larr; Back
-      </button>
-
-      <div style={{ textAlign: "center", marginBottom: 32 }}>
-        <div style={{ fontSize: 48, marginBottom: 12 }}>{cfg.icon}</div>
-        <h2 style={{
           fontFamily: "'Barlow Condensed', sans-serif",
-          fontSize: 28,
+          fontSize: "clamp(28px, 5vw, 40px)",
           fontWeight: 900,
-          color: cfg.color,
-          margin: 0,
+          margin: "0 0 8px",
+          letterSpacing: "-0.01em",
         }}>
-          {cfg.title}
+          Record Activity
         </h2>
+        <p style={{ color: COLORS.body, opacity: 0.7, margin: 0 }}>
+          Log your fan activities and earn loyalty points
+        </p>
       </div>
 
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-        {cfg.fields.map((field) => (
-          <div key={field.key}>
-            <label style={{ display: "block", marginBottom: 8, fontSize: 14, opacity: 0.8 }}>
-              {field.label} {field.required && <span style={{ color: COLORS.red }}>*</span>}
-            </label>
-            {field.type === "select" ? (
-              <select
-                value={formData[field.key] || ""}
-                onChange={(e) => setFormData({ ...formData, [field.key]: e.target.value })}
-                required={field.required}
-                style={{ width: "100%" }}
+      <form onSubmit={handleSubmit} style={{
+        background: COLORS.bgSoft,
+        border: `1px solid ${COLORS.hairline}`,
+        borderRadius: 4,
+        padding: 32,
+        display: "flex",
+        flexDirection: "column",
+        gap: 24,
+      }}>
+        {/* Activity Type - visual selector */}
+        <div>
+          <label style={{
+            display: "block",
+            marginBottom: 12,
+            fontSize: 11,
+            fontFamily: "'DM Mono', monospace",
+            color: COLORS.body,
+            opacity: 0.7,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+          }}>
+            Activity Type
+          </label>
+          <div className="grid-responsive" style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+            gap: 8,
+          }}>
+            {activityTypes.map(t => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => setActivityType(t.value)}
+                style={{
+                  padding: "14px 16px",
+                  background: activityType === t.value ? COLORS.greenGlow : COLORS.bg,
+                  border: `1px solid ${activityType === t.value ? COLORS.green : COLORS.hairline}`,
+                  borderRadius: 4,
+                  textAlign: "left",
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                  color: COLORS.body,
+                }}
               >
-                <option value="">Select...</option>
-                {field.options.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
-            ) : (
-              <input
-                type={field.type || "text"}
-                value={formData[field.key] || ""}
-                onChange={(e) => setFormData({ ...formData, [field.key]: e.target.value })}
-                placeholder={field.placeholder}
-                required={field.required}
-                style={{ width: "100%" }}
-              />
-            )}
+                <div style={{
+                  fontSize: 13,
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontWeight: 700,
+                  color: activityType === t.value ? COLORS.green : "#F2F5EE",
+                  letterSpacing: "0.05em",
+                  textTransform: "uppercase",
+                  marginBottom: 2,
+                }}>
+                  {t.label}
+                </div>
+                <div style={{
+                  fontSize: 11,
+                  opacity: 0.6,
+                  textTransform: "none",
+                  letterSpacing: 0,
+                  fontFamily: "'Crimson Pro', serif",
+                }}>
+                  {t.desc}
+                </div>
+              </button>
+            ))}
           </div>
-        ))}
+        </div>
 
-        <button type="submit" className="btn-primary" disabled={loading} style={{ width: "100%", marginTop: 12 }}>
-          {loading ? "Recording on-chain..." : "Stamp My Passport"}
+        <FormField
+          label="Description"
+          name="description"
+          value={description}
+          onChange={setDescription}
+          placeholder="What did you do?"
+        />
+
+        {/* Points slider */}
+        <div>
+          <label style={{
+            display: "flex",
+            justifyContent: "space-between",
+            marginBottom: 12,
+            fontSize: 11,
+            fontFamily: "'DM Mono', monospace",
+            color: COLORS.body,
+            opacity: 0.7,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+          }}>
+            <span>Points</span>
+            <span style={{ color: COLORS.green, opacity: 1 }}>{points}</span>
+          </label>
+          <input
+            type="range"
+            min="1"
+            max="100"
+            value={points}
+            onChange={(e) => setPoints(e.target.value)}
+            style={{
+              width: "100%",
+              accentColor: COLORS.green,
+            }}
+          />
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            marginTop: 4,
+            fontSize: 10,
+            fontFamily: "'DM Mono', monospace",
+            opacity: 0.5,
+          }}>
+            <span>1</span>
+            <span>50</span>
+            <span>100</span>
+          </div>
+        </div>
+
+        <button type="submit" className="btn-primary" disabled={loading} style={{ marginTop: 8 }}>
+          {loading ? (
+            <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
+              <LoadingSpinner size={14} color={COLORS.bg} />
+              Logging...
+            </span>
+          ) : (
+            `Log Activity (+${points})`
+          )}
         </button>
       </form>
     </div>
@@ -1159,89 +1649,178 @@ function InteractionForm({ type, loading, onSubmit, onBack }) {
 }
 
 // ============================================================================
-// INTERACTION HISTORY
+// HISTORY TAB
 // ============================================================================
 
-function InteractionHistory({ passport }) {
-  const interactions = passport?.interactions || [];
+function HistoryTab({ token, showToast }) {
+  const [activities, setActivities] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all");
+
+  useEffect(() => {
+    fetchAllActivities();
+  }, []);
+
+  async function fetchAllActivities() {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/loyalty/activities`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      setActivities(data.activities || []);
+    } catch (err) {
+      showToast("Could not load history", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const filtered = filter === "all"
+    ? activities
+    : activities.filter(a => a.activity_type === filter);
+
+  const filterTypes = ["all", "engagement", "passion", "knowledge", "consistency", "community", "growth"];
 
   return (
-    <div style={{ maxWidth: 800, margin: "0 auto" }}>
-      <h2 style={{
-        fontFamily: "'Barlow Condensed', sans-serif",
-        fontSize: 28,
-        fontWeight: 900,
-        color: "#F2F5EE",
-        marginBottom: 8,
-      }}>
-        On-Chain History
-      </h2>
-      <p style={{ marginBottom: 32, opacity: 0.7 }}>
-        Every interaction is recorded with a transaction hash for verification.
-      </p>
+    <div>
+      <div style={{ marginBottom: 32 }}>
+        <h2 style={{
+          color: "#F2F5EE",
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontSize: "clamp(28px, 5vw, 40px)",
+          fontWeight: 900,
+          margin: "0 0 8px",
+        }}>
+          Activity History
+        </h2>
+        <p style={{ color: COLORS.body, opacity: 0.7, margin: 0 }}>
+          {activities.length} total {activities.length === 1 ? "activity" : "activities"}
+        </p>
+      </div>
 
-      {interactions.length === 0 ? (
+      {/* Filter chips */}
+      <div style={{
+        display: "flex",
+        gap: 8,
+        marginBottom: 24,
+        flexWrap: "wrap",
+      }}>
+        {filterTypes.map(t => (
+          <button
+            key={t}
+            onClick={() => setFilter(t)}
+            style={{
+              padding: "8px 14px",
+              background: filter === t ? COLORS.greenGlow : "transparent",
+              border: `1px solid ${filter === t ? COLORS.green : COLORS.hairline}`,
+              color: filter === t ? COLORS.green : COLORS.body,
+              fontSize: 11,
+              borderRadius: 100,
+              textTransform: "capitalize",
+              fontFamily: "'DM Mono', monospace",
+              letterSpacing: "0.05em",
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[1,2,3,4,5].map(i => <Skeleton key={i} height={72} />)}
+        </div>
+      ) : filtered.length === 0 ? (
         <div style={{
           textAlign: "center",
-          padding: 60,
+          padding: "80px 20px",
           background: COLORS.bgSoft,
-          borderRadius: 8,
           border: `1px solid ${COLORS.hairline}`,
+          borderRadius: 4,
         }}>
-          <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>🔗</div>
-          <p style={{ opacity: 0.5 }}>No interactions recorded yet. Start building your passport!</p>
+          <div style={{ fontSize: 48, opacity: 0.3, marginBottom: 16 }}>⚡</div>
+          <div style={{
+            fontFamily: "'Barlow Condensed', sans-serif",
+            fontSize: 20,
+            color: "#F2F5EE",
+            marginBottom: 8,
+          }}>
+            {filter === "all" ? "No activities yet" : `No ${filter} activities`}
+          </div>
+          <div style={{ color: COLORS.body, opacity: 0.6, fontSize: 14 }}>
+            {filter === "all" ? "Log your first activity to start earning loyalty points" : "Try a different filter"}
+          </div>
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {interactions.map((ix, i) => (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {filtered.map((activity, i) => (
             <div
-              key={i}
+              key={activity.id || i}
               style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                padding: "18px 20px",
                 background: COLORS.bgSoft,
+                borderRadius: 4,
                 border: `1px solid ${COLORS.hairline}`,
-                borderRadius: 8,
-                padding: "16px 20px",
+                transition: "all 0.2s",
+                opacity: 0,
+                animation: `fadeIn 0.3s ease-out ${i * 0.03}s forwards`,
+                gap: 16,
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = COLORS.green;
+                e.currentTarget.style.background = COLORS.bgCard;
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = COLORS.hairline;
+                e.currentTarget.style.background = COLORS.bgSoft;
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <span style={{ fontSize: 24 }}>
-                    {ix.interaction_type === "match_attendance" ? "🏟️" :
-                     ix.interaction_type === "merch_purchase" ? "👕" : "📱"}
-                  </span>
-                  <div>
-                    <div style={{ color: "#F2F5EE", fontSize: 15, fontWeight: 500 }}>
-                      {formatInteractionLabel(ix.interaction_type, ix.metadata)}
-                    </div>
-                    <div style={{ fontSize: 12, opacity: 0.5, marginTop: 2 }}>
-                      {new Date(ix.created_at).toLocaleString()}
-                    </div>
-                  </div>
-                </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{
-                  color: COLORS.green,
                   fontFamily: "'DM Mono', monospace",
-                  fontSize: 14,
-                  fontWeight: 500,
+                  fontSize: 10,
+                  color: COLORS.green,
+                  letterSpacing: "0.15em",
+                  textTransform: "uppercase",
+                  marginBottom: 4,
                 }}>
-                  +{ix.points}
+                  {activity.activity_type}
+                </div>
+                {activity.description && (
+                  <div style={{ color: "#F2F5EE", marginBottom: 4, fontSize: 15 }}>
+                    {activity.description}
+                  </div>
+                )}
+                <div style={{
+                  fontSize: 11,
+                  opacity: 0.5,
+                  fontFamily: "'DM Mono', monospace",
+                }}>
+                  {new Date(activity.created_at).toLocaleDateString("en-GB", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
                 </div>
               </div>
-
-              {ix.tx_hash && (
-                <div style={{
-                  fontFamily: "'DM Mono', monospace",
-                  fontSize: 11,
-                  color: COLORS.teal,
-                  opacity: 0.7,
-                  background: COLORS.bg,
-                  padding: "6px 10px",
-                  borderRadius: 4,
-                  wordBreak: "break-all",
-                }}>
-                  tx: {ix.tx_hash}
-                </div>
-              )}
+              <div style={{
+                color: COLORS.green,
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontWeight: 900,
+                fontSize: 20,
+                flexShrink: 0,
+                letterSpacing: "0.02em",
+              }}>
+                +{activity.points}
+              </div>
             </div>
           ))}
         </div>
@@ -1254,7 +1833,7 @@ function InteractionHistory({ passport }) {
 // PROFILE TAB
 // ============================================================================
 
-function ProfileTab({ user, token, onUpdate }) {
+function ProfileTab({ user, token, onUpdate, showToast }) {
   const [editing, setEditing] = useState(false);
   const [formData, setFormData] = useState({
     display_name: user.display_name,
@@ -1262,12 +1841,11 @@ function ProfileTab({ user, token, onUpdate }) {
     bio: user.bio || "",
   });
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
 
   async function handleSave() {
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/user/profile`, {
+      const response = await fetch(`${API_URL}/user/profile`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -1275,579 +1853,124 @@ function ProfileTab({ user, token, onUpdate }) {
         },
         body: JSON.stringify(formData),
       });
-      if (!response.ok) throw new Error("Failed to update profile");
-      setMessage("Profile updated!");
+
+      if (!response.ok) throw new Error("Failed to update");
+      
+      showToast("Profile updated ✓", "success");
       setEditing(false);
       onUpdate();
-      setTimeout(() => setMessage(""), 3000);
     } catch (err) {
-      setMessage("Error updating profile");
+      showToast("Could not update profile", "error");
     } finally {
       setLoading(false);
     }
   }
 
+  function handleCancel() {
+    setFormData({
+      display_name: user.display_name,
+      favorite_club: user.favorite_club || "",
+      bio: user.bio || "",
+    });
+    setEditing(false);
+  }
+
   return (
     <div style={{ maxWidth: 600 }}>
-      <h2 style={{ marginBottom: 32, color: "#F2F5EE", fontFamily: "'Barlow Condensed', sans-serif" }}>My Profile</h2>
-
-      {message && (
-        <div style={{
-          padding: "12px 16px",
-          marginBottom: 24,
-          background: `${COLORS.green}20`,
-          border: `1px solid ${COLORS.green}`,
-          color: COLORS.green,
-          borderRadius: 4,
-          fontSize: 14,
+      <div style={{ marginBottom: 32 }}>
+        <h2 style={{
+          color: "#F2F5EE",
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontSize: "clamp(28px, 5vw, 40px)",
+          fontWeight: 900,
+          margin: "0 0 8px",
         }}>
-          {message}
-        </div>
-      )}
+          My Profile
+        </h2>
+        <p style={{ color: COLORS.body, opacity: 0.7, margin: 0 }}>
+          Manage your account information
+        </p>
+      </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{
+        background: COLORS.bgSoft,
+        border: `1px solid ${COLORS.hairline}`,
+        borderRadius: 4,
+        padding: 32,
+        display: "flex",
+        flexDirection: "column",
+        gap: 20,
+      }}>
+        <FormField
+          label="Email"
+          value={user.email}
+          onChange={() => {}}
+          type="email"
+        />
+        {/* Disable email */}
+        <style>{`input[value="${user.email}"] { opacity: 0.5; cursor: not-allowed; pointer-events: none; }`}</style>
+
+        <FormField
+          label="Username"
+          value={user.username}
+          onChange={() => {}}
+        />
+
+        <FormField
+          label="Display Name"
+          value={formData.display_name}
+          onChange={editing ? (v) => setFormData({...formData, display_name: v}) : () => {}}
+        />
+
+        <FormField
+          label="Favorite Club"
+          value={formData.favorite_club}
+          onChange={editing ? (v) => setFormData({...formData, favorite_club: v}) : () => {}}
+          placeholder="e.g., Barcelona"
+        />
+
         <div>
-          <label style={{ display: "block", marginBottom: 8, opacity: 0.8 }}>DID</label>
-          <input type="text" value={user.did || ""} disabled style={{ width: "100%", opacity: 0.6, cursor: "not-allowed", fontFamily: "'DM Mono', monospace", fontSize: 12 }} />
+          <label style={{
+            display: "block",
+            marginBottom: 8,
+            fontSize: 11,
+            fontFamily: "'DM Mono', monospace",
+            color: COLORS.body,
+            opacity: 0.7,
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+          }}>
+            Bio
+          </label>
+          <textarea
+            value={formData.bio}
+            onChange={editing ? (e) => setFormData({...formData, bio: e.target.value}) : () => {}}
+            disabled={!editing}
+            placeholder="Tell us about yourself..."
+            style={{ minHeight: 100, resize: "vertical", opacity: editing ? 1 : 0.6 }}
+          />
         </div>
-        <div>
-          <label style={{ display: "block", marginBottom: 8, opacity: 0.8 }}>Wallet Address</label>
-          <input type="text" value={user.wallet_address || ""} disabled style={{ width: "100%", opacity: 0.6, cursor: "not-allowed", fontFamily: "'DM Mono', monospace", fontSize: 12 }} />
-        </div>
-        <div>
-          <label style={{ display: "block", marginBottom: 8, opacity: 0.8 }}>Email</label>
-          <input type="email" value={user.email} disabled style={{ width: "100%", opacity: 0.6, cursor: "not-allowed" }} />
-        </div>
-        <div>
-          <label style={{ display: "block", marginBottom: 8, opacity: 0.8 }}>Username</label>
-          <input type="text" value={user.username} disabled style={{ width: "100%", opacity: 0.6, cursor: "not-allowed" }} />
-        </div>
-        <div>
-          <label style={{ display: "block", marginBottom: 8, opacity: 0.8 }}>Display Name</label>
-          <input type="text" value={formData.display_name} onChange={(e) => setFormData({ ...formData, display_name: e.target.value })} disabled={!editing} style={{ width: "100%" }} />
-        </div>
-        <div>
-          <label style={{ display: "block", marginBottom: 8, opacity: 0.8 }}>Favorite Club</label>
-          <input type="text" value={formData.favorite_club} onChange={(e) => setFormData({ ...formData, favorite_club: e.target.value })} disabled={!editing} style={{ width: "100%" }} />
-        </div>
-        <div>
-          <label style={{ display: "block", marginBottom: 8, opacity: 0.8 }}>Bio</label>
-          <textarea value={formData.bio} onChange={(e) => setFormData({ ...formData, bio: e.target.value })} disabled={!editing} style={{ width: "100%", minHeight: 100, resize: "vertical" }} placeholder="Tell us about yourself..." />
-        </div>
-        <div style={{ display: "flex", gap: 12 }}>
+
+        <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
           {!editing ? (
-            <button className="btn-primary" onClick={() => setEditing(true)}>Edit Profile</button>
+            <button className="btn-primary" onClick={() => setEditing(true)}>
+              Edit Profile
+            </button>
           ) : (
             <>
-              <button className="btn-primary" onClick={handleSave} disabled={loading}>
-                {loading ? "Saving..." : "Save Changes"}
+              <button className="btn-primary" onClick={handleSave} disabled={loading} style={{ flex: 1 }}>
+                {loading ? (
+                  <span style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
+                    <LoadingSpinner size={14} color={COLORS.bg} />
+                    Saving...
+                  </span>
+                ) : "Save Changes"}
               </button>
-              <button className="btn-ghost" onClick={() => setEditing(false)}>Cancel</button>
+              <button className="btn-ghost" onClick={handleCancel}>Cancel</button>
             </>
           )}
         </div>
       </div>
     </div>
   );
-}
-
-// ============================================================================
-// SOCIAL SYNC — X (Twitter) OAuth & Activity Sync
-// ============================================================================
-
-function SocialSync({ token, apiUrl, onComplete }) {
-  const [status, setStatus] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState(null);
-  const [clubs, setClubs] = useState([]);
-  const [showClubs, setShowClubs] = useState(false);
-
-  useEffect(() => {
-    fetchStatus();
-    fetchClubs();
-    // Check URL for twitter callback result
-    const hash = window.location.hash;
-    if (hash.includes("twitter=connected")) {
-      // Clean URL
-      window.location.hash = "#portal";
-      fetchStatus();
-    }
-  }, []);
-
-  async function fetchStatus() {
-    setLoading(true);
-    try {
-      const res = await fetch(`${apiUrl}/api/twitter/status`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setStatus(data);
-      }
-    } catch (err) {
-      console.error("Failed to fetch X status:", err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function fetchClubs() {
-    try {
-      const res = await fetch(`${apiUrl}/api/twitter/clubs`);
-      if (res.ok) {
-        const data = await res.json();
-        setClubs(data.clubs || []);
-      }
-    } catch (err) {
-      console.error("Failed to fetch clubs:", err);
-    }
-  }
-
-  function connectX() {
-    // Redirect to OAuth endpoint
-    window.location.href = `${apiUrl}/api/twitter/auth?token=${token}`;
-  }
-
-  async function disconnectX() {
-    try {
-      const res = await fetch(`${apiUrl}/api/twitter/disconnect`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        setStatus({ connected: false });
-        setSyncResult(null);
-      }
-    } catch (err) {
-      console.error("Failed to disconnect:", err);
-    }
-  }
-
-  async function syncNow() {
-    setSyncing(true);
-    setSyncResult(null);
-    try {
-      const res = await fetch(`${apiUrl}/api/twitter/sync`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
-      if (!res.ok) throw new Error("Sync failed");
-      const data = await res.json();
-      setSyncResult(data);
-      onComplete(); // refresh passport data
-    } catch (err) {
-      console.error("Sync failed:", err);
-      setSyncResult({ error: err.message });
-    } finally {
-      setSyncing(false);
-    }
-  }
-
-  if (loading) {
-    return (
-      <div style={{ maxWidth: 700, margin: "0 auto", textAlign: "center", padding: 60 }}>
-        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 14, color: COLORS.body, opacity: 0.6 }}>
-          Checking X connection...
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ maxWidth: 700, margin: "0 auto" }}>
-      <h2 style={{
-        fontFamily: "'Barlow Condensed', sans-serif",
-        fontSize: 28,
-        fontWeight: 900,
-        color: "#F2F5EE",
-        marginBottom: 8,
-      }}>
-        X (Twitter) Sync
-      </h2>
-      <p style={{ marginBottom: 32, opacity: 0.7, lineHeight: 1.6 }}>
-        Connect your X account and sync your likes, retweets, and replies on football club posts.
-        Each qualifying interaction earns 10 passport points.
-      </p>
-
-      {/* Demo mode banner */}
-      {status?.demo_mode && (
-        <div style={{
-          background: `${COLORS.gold}15`,
-          border: `1px solid ${COLORS.gold}40`,
-          borderRadius: 8,
-          padding: "14px 20px",
-          marginBottom: 24,
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-        }}>
-          <span style={{ fontSize: 20 }}>🧪</span>
-          <div>
-            <div style={{ color: COLORS.gold, fontFamily: "'DM Mono', monospace", fontSize: 11, letterSpacing: "0.1em", marginBottom: 4 }}>
-              DEMO MODE
-            </div>
-            <div style={{ fontSize: 13, color: COLORS.body, opacity: 0.8 }}>
-              No X API keys configured. Sync will generate simulated club interactions for testing.
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Connection Status Card */}
-      <div style={{
-        background: COLORS.bgSoft,
-        border: `1px solid ${status?.connected ? COLORS.teal + "60" : COLORS.hairline}`,
-        borderRadius: 8,
-        padding: 28,
-        marginBottom: 24,
-      }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: status?.connected ? 20 : 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            {/* X Logo */}
-            <div style={{
-              width: 48,
-              height: 48,
-              background: status?.connected ? `${COLORS.teal}20` : COLORS.bg,
-              border: `2px solid ${status?.connected ? COLORS.teal : COLORS.hairline}`,
-              borderRadius: 12,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 22,
-              fontFamily: "'Barlow Condensed', sans-serif",
-              fontWeight: 900,
-              color: status?.connected ? COLORS.teal : COLORS.body,
-            }}>
-              𝕏
-            </div>
-            <div>
-              <div style={{ color: "#F2F5EE", fontSize: 16, fontWeight: 500, marginBottom: 4 }}>
-                {status?.connected ? (
-                  <>
-                    Connected as <span style={{ color: COLORS.teal }}>@{status.twitter_username}</span>
-                  </>
-                ) : (
-                  "Not Connected"
-                )}
-              </div>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: COLORS.body, opacity: 0.5 }}>
-                {status?.connected
-                  ? status.last_synced
-                    ? `Last synced: ${new Date(status.last_synced).toLocaleString()}`
-                    : "Never synced"
-                  : "Connect to start earning social points"}
-              </div>
-            </div>
-          </div>
-
-          {!status?.connected ? (
-            <button className="btn-primary" onClick={connectX}>
-              Connect X
-            </button>
-          ) : (
-            <button
-              className="btn-ghost"
-              onClick={disconnectX}
-              style={{ fontSize: 10, padding: "8px 14px", borderColor: COLORS.red + "60", color: COLORS.red }}
-            >
-              Disconnect
-            </button>
-          )}
-        </div>
-
-        {/* Sync Now Button */}
-        {status?.connected && (
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <button
-              className="btn-primary"
-              onClick={syncNow}
-              disabled={syncing}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                background: COLORS.teal,
-              }}
-            >
-              {syncing ? (
-                <>
-                  <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</span>
-                  Syncing...
-                </>
-              ) : (
-                "Sync Now"
-              )}
-            </button>
-            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: COLORS.body, opacity: 0.5 }}>
-              Pull latest likes, retweets & replies
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Sync Results */}
-      {syncResult && !syncResult.error && (
-        <div style={{
-          background: `${COLORS.green}08`,
-          border: `1px solid ${COLORS.green}30`,
-          borderRadius: 8,
-          padding: 24,
-          marginBottom: 24,
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-            <div>
-              <div style={{ color: COLORS.green, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 20, fontWeight: 700, marginBottom: 4 }}>
-                Sync Complete!
-              </div>
-              <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, color: COLORS.body, opacity: 0.7 }}>
-                {syncResult.total_found} interaction(s) found, {syncResult.new_interactions?.length || 0} new
-                {syncResult.already_synced > 0 && `, ${syncResult.already_synced} already recorded`}
-              </div>
-            </div>
-            {syncResult.points_earned > 0 && (
-              <div style={{
-                background: `${COLORS.green}20`,
-                color: COLORS.green,
-                fontFamily: "'DM Mono', monospace",
-                fontSize: 18,
-                fontWeight: 700,
-                padding: "8px 16px",
-                borderRadius: 8,
-              }}>
-                +{syncResult.points_earned} pts
-              </div>
-            )}
-          </div>
-
-          {/* List new interactions */}
-          {syncResult.new_interactions?.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {syncResult.new_interactions.map((ix, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "12px 16px",
-                    background: COLORS.bgSoft,
-                    borderRadius: 4,
-                    border: `1px solid ${COLORS.hairline}`,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
-                    <span style={{
-                      fontSize: 14,
-                      background: actionColor(ix.metadata?.action) + "20",
-                      color: actionColor(ix.metadata?.action),
-                      padding: "4px 8px",
-                      borderRadius: 4,
-                      fontFamily: "'DM Mono', monospace",
-                      textTransform: "uppercase",
-                      fontSize: 10,
-                      letterSpacing: "0.05em",
-                      whiteSpace: "nowrap",
-                    }}>
-                      {ix.metadata?.action || "engage"}
-                    </span>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ color: COLORS.teal, fontSize: 13, fontFamily: "'DM Mono', monospace" }}>
-                        {ix.metadata?.club_handle}
-                      </div>
-                      <div style={{
-                        fontSize: 12,
-                        color: COLORS.body,
-                        opacity: 0.6,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        maxWidth: 350,
-                      }}>
-                        {ix.metadata?.tweet_preview}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ color: COLORS.green, fontFamily: "'DM Mono', monospace", fontSize: 12, whiteSpace: "nowrap", marginLeft: 12 }}>
-                    +10
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {syncResult.new_interactions?.length === 0 && (
-            <div style={{ textAlign: "center", padding: "16px 0", opacity: 0.6, fontSize: 14 }}>
-              No new club interactions found since last sync.
-            </div>
-          )}
-        </div>
-      )}
-
-      {syncResult?.error && (
-        <div style={{
-          background: `${COLORS.red}15`,
-          border: `1px solid ${COLORS.red}40`,
-          borderRadius: 8,
-          padding: "14px 20px",
-          marginBottom: 24,
-          color: "#FF9AAD",
-          fontSize: 14,
-        }}>
-          Sync failed: {syncResult.error}
-        </div>
-      )}
-
-      {/* Tracked Clubs */}
-      <div style={{
-        background: COLORS.bgSoft,
-        border: `1px solid ${COLORS.hairline}`,
-        borderRadius: 8,
-        overflow: "hidden",
-      }}>
-        <button
-          onClick={() => setShowClubs(!showClubs)}
-          style={{
-            width: "100%",
-            background: "transparent",
-            border: "none",
-            padding: "16px 20px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            cursor: "pointer",
-            color: COLORS.body,
-          }}
-        >
-          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 12, letterSpacing: "0.1em" }}>
-            TRACKED CLUBS ({clubs.length})
-          </span>
-          <span style={{ fontSize: 12, opacity: 0.5 }}>
-            {showClubs ? "▲" : "▼"}
-          </span>
-        </button>
-
-        {showClubs && (
-          <div style={{ padding: "0 20px 20px", display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {clubs.map((club, i) => (
-              <div
-                key={i}
-                style={{
-                  background: COLORS.bg,
-                  border: `1px solid ${COLORS.hairline}`,
-                  borderRadius: 20,
-                  padding: "6px 14px",
-                  fontSize: 12,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                <span style={{ color: COLORS.teal, fontFamily: "'DM Mono', monospace", fontSize: 11 }}>
-                  @{club.handle}
-                </span>
-                <span style={{ opacity: 0.5, fontSize: 11 }}>
-                  {club.name}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* How it works */}
-      <div style={{
-        marginTop: 32,
-        padding: 24,
-        background: COLORS.bgSoft,
-        border: `1px solid ${COLORS.hairline}`,
-        borderRadius: 8,
-      }}>
-        <div style={{
-          fontFamily: "'DM Mono', monospace",
-          fontSize: 11,
-          color: COLORS.body,
-          opacity: 0.5,
-          letterSpacing: "0.15em",
-          marginBottom: 16,
-        }}>
-          HOW IT WORKS
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 20 }}>
-          {[
-            { step: "1", title: "Connect", desc: "Link your X account via OAuth" },
-            { step: "2", title: "Interact", desc: "Like, retweet, or reply to club posts" },
-            { step: "3", title: "Sync", desc: 'Click "Sync Now" to pull activity' },
-            { step: "4", title: "Earn", desc: "10 points per qualifying interaction" },
-          ].map((item, i) => (
-            <div key={i} style={{ textAlign: "center" }}>
-              <div style={{
-                width: 32,
-                height: 32,
-                background: `${COLORS.teal}20`,
-                border: `1px solid ${COLORS.teal}40`,
-                borderRadius: "50%",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                margin: "0 auto 8px",
-                fontFamily: "'DM Mono', monospace",
-                fontSize: 13,
-                color: COLORS.teal,
-                fontWeight: 700,
-              }}>
-                {item.step}
-              </div>
-              <div style={{ color: "#F2F5EE", fontSize: 14, fontWeight: 500, marginBottom: 4 }}>
-                {item.title}
-              </div>
-              <div style={{ fontSize: 12, opacity: 0.6 }}>
-                {item.desc}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-function actionColor(action) {
-  switch (action) {
-    case "like": return COLORS.red;
-    case "retweet": return COLORS.green;
-    case "reply": return COLORS.teal;
-    default: return COLORS.body;
-  }
-}
-
-// ============================================================================
-// HELPERS
-// ============================================================================
-
-function formatInteractionLabel(type, metadata) {
-  const meta = metadata || {};
-  switch (type) {
-    case "match_attendance":
-      return meta.match_name ? `Match: ${meta.match_name}` : "Match Attendance";
-    case "merch_purchase":
-      return meta.item_name ? `Purchased: ${meta.item_name}` : "Merch Purchase";
-    case "social_media": {
-      const action = meta.action || "Engaged";
-      const platform = meta.platform ? ` on ${meta.platform}` : "";
-      return `${action}${platform}`;
-    }
-    default:
-      return "Interaction";
-  }
 }

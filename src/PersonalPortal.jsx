@@ -1042,6 +1042,7 @@ function Dashboard({ user, token, onProfileUpdate, showToast }) {
 
   const tabs = [
     { id: "passport", label: "Passport" },
+    { id: "leaderboard", label: "🏆 Leaderboard" },
     { id: "activities", label: "Record Activity" },
     { id: "history", label: "History" },
     { id: "profile", label: "Profile" },
@@ -1087,6 +1088,9 @@ function Dashboard({ user, token, onProfileUpdate, showToast }) {
       <div key={activeTab} className="fade-in">
         {activeTab === "passport" && (
           <PassportTab user={user} loyaltyData={loyaltyData} loading={loading} />
+        )}
+        {activeTab === "leaderboard" && (
+          <LeaderboardTab token={token} user={user} showToast={showToast} />
         )}
         {activeTab === "activities" && (
           <ActivitiesTab
@@ -1971,6 +1975,404 @@ function ProfileTab({ user, token, onUpdate, showToast }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// LEADERBOARD TAB
+// ============================================================================
+
+function LeaderboardTab({ token, user, showToast }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [filterClub, setFilterClub] = useState("");
+  const [showOnlyMyClub, setShowOnlyMyClub] = useState(false);
+
+  useEffect(() => {
+    fetchLeaderboard();
+  }, [showOnlyMyClub, filterClub]);
+
+  async function fetchLeaderboard() {
+    setLoading(true);
+    try {
+      let url = `${API_URL}/leaderboard?limit=100`;
+      const club = showOnlyMyClub ? user.favorite_club : filterClub;
+      if (club) {
+        url += `&club=${encodeURIComponent(club)}`;
+      }
+
+      const response = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) throw new Error("Failed to load leaderboard");
+      const result = await response.json();
+      setData(result);
+    } catch (err) {
+      console.error(err);
+      showToast("Could not load leaderboard", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function getMedal(rank) {
+    if (rank === 1) return "🥇";
+    if (rank === 2) return "🥈";
+    if (rank === 3) return "🥉";
+    return null;
+  }
+
+  function getLevelColor(level) {
+    const map = {
+      legend: "#FF4757",
+      master: "#9C88FF",
+      veteran: COLORS.gold,
+      devotee: COLORS.teal,
+      supporter: COLORS.green,
+      apprentice: COLORS.body,
+    };
+    return map[level] || COLORS.body;
+  }
+
+  return (
+    <div style={{ maxWidth: 900 }}>
+      {/* Header */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{
+          fontSize: 11,
+          fontFamily: "'DM Mono', monospace",
+          color: COLORS.gold,
+          letterSpacing: "0.25em",
+          marginBottom: 12,
+        }}>
+          — GLOBAL RANKINGS
+        </div>
+        <h2 style={{
+          color: "#F2F5EE",
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontSize: "clamp(28px, 5vw, 40px)",
+          fontWeight: 900,
+          margin: "0 0 8px",
+          letterSpacing: "-0.01em",
+        }}>
+          Leaderboard
+        </h2>
+        <p style={{ color: COLORS.body, opacity: 0.7, margin: 0 }}>
+          {data ? `${data.meta.total_users} fans competing for the top spot` : "Loading..."}
+        </p>
+      </div>
+
+      {/* Your rank card */}
+      {data && data.you && (
+        <div style={{
+          background: `linear-gradient(135deg, ${COLORS.bgCard} 0%, ${COLORS.bgSoft} 100%)`,
+          border: `1px solid ${COLORS.green}`,
+          borderRadius: 8,
+          padding: 24,
+          marginBottom: 24,
+          boxShadow: `0 0 40px ${COLORS.greenGlow}`,
+          position: "relative",
+          overflow: "hidden",
+        }}>
+          <div style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            background: COLORS.green,
+            color: COLORS.bg,
+            padding: "4px 12px",
+            fontSize: 10,
+            fontFamily: "'DM Mono', monospace",
+            letterSpacing: "0.15em",
+            fontWeight: 700,
+          }}>
+            YOU
+          </div>
+
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 24,
+            flexWrap: "wrap",
+          }}>
+            <div style={{
+              fontSize: 48,
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontWeight: 900,
+              color: COLORS.green,
+              minWidth: 80,
+            }}>
+              #{data.you.rank}
+            </div>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{
+                fontSize: 22,
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontWeight: 900,
+                color: "#F2F5EE",
+                marginBottom: 4,
+              }}>
+                {data.you.display_name}
+              </div>
+              <div style={{
+                fontSize: 11,
+                fontFamily: "'DM Mono', monospace",
+                color: getLevelColor(data.you.level),
+                letterSpacing: "0.15em",
+                textTransform: "uppercase",
+              }}>
+                {data.you.level} · @{data.you.username}
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{
+                fontSize: 32,
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontWeight: 900,
+                color: COLORS.green,
+              }}>
+                {Math.round(data.you.total_score)}
+              </div>
+              <div style={{
+                fontSize: 10,
+                fontFamily: "'DM Mono', monospace",
+                color: COLORS.body,
+                opacity: 0.6,
+                letterSpacing: "0.15em",
+              }}>
+                POINTS
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div style={{
+        display: "flex",
+        gap: 8,
+        marginBottom: 24,
+        flexWrap: "wrap",
+      }}>
+        <button
+          onClick={() => { setShowOnlyMyClub(false); setFilterClub(""); }}
+          style={{
+            padding: "10px 16px",
+            background: !showOnlyMyClub && !filterClub ? COLORS.greenGlow : "transparent",
+            border: `1px solid ${!showOnlyMyClub && !filterClub ? COLORS.green : COLORS.hairline}`,
+            color: !showOnlyMyClub && !filterClub ? COLORS.green : COLORS.body,
+            fontSize: 11,
+            borderRadius: 100,
+            fontFamily: "'DM Mono', monospace",
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          🌍 Global
+        </button>
+        {user.favorite_club && (
+          <button
+            onClick={() => { setShowOnlyMyClub(true); setFilterClub(""); }}
+            style={{
+              padding: "10px 16px",
+              background: showOnlyMyClub ? COLORS.greenGlow : "transparent",
+              border: `1px solid ${showOnlyMyClub ? COLORS.green : COLORS.hairline}`,
+              color: showOnlyMyClub ? COLORS.green : COLORS.body,
+              fontSize: 11,
+              borderRadius: 100,
+              fontFamily: "'DM Mono', monospace",
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+          >
+            ⚽ My Club ({user.favorite_club})
+          </button>
+        )}
+      </div>
+
+      {/* Leaderboard list */}
+      {loading ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[1,2,3,4,5,6,7,8].map(i => <Skeleton key={i} height={64} />)}
+        </div>
+      ) : data && data.leaderboard.length === 0 ? (
+        <div style={{
+          textAlign: "center",
+          padding: "80px 20px",
+          background: COLORS.bgSoft,
+          border: `1px solid ${COLORS.hairline}`,
+          borderRadius: 4,
+        }}>
+          <div style={{ fontSize: 48, opacity: 0.3, marginBottom: 16 }}>🏆</div>
+          <div style={{
+            fontFamily: "'Barlow Condensed', sans-serif",
+            fontSize: 20,
+            color: "#F2F5EE",
+            marginBottom: 8,
+          }}>
+            No rankings yet
+          </div>
+          <div style={{ color: COLORS.body, opacity: 0.6, fontSize: 14 }}>
+            {showOnlyMyClub ? "No fans of this club yet. Be the first!" : "Be the first to log activity and claim #1!"}
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {data.leaderboard.map((entry, i) => {
+            const isMe = data.you && entry.username === data.you.username;
+            const medal = getMedal(entry.rank);
+            const isTop3 = entry.rank <= 3;
+
+            return (
+              <div
+                key={entry.username}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 16,
+                  padding: "16px 20px",
+                  background: isMe ? COLORS.greenGlow : (isTop3 ? COLORS.bgCard : COLORS.bgSoft),
+                  borderRadius: 4,
+                  border: `1px solid ${isMe ? COLORS.green : (isTop3 ? COLORS.gold + "30" : COLORS.hairline)}`,
+                  transition: "all 0.2s",
+                  opacity: 0,
+                  animation: `fadeIn 0.3s ease-out ${Math.min(i * 0.02, 0.5)}s forwards`,
+                  position: "relative",
+                }}
+                onMouseEnter={e => {
+                  if (!isMe) {
+                    e.currentTarget.style.borderColor = COLORS.green;
+                    e.currentTarget.style.background = COLORS.bgCard;
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!isMe) {
+                    e.currentTarget.style.borderColor = isTop3 ? COLORS.gold + "30" : COLORS.hairline;
+                    e.currentTarget.style.background = isTop3 ? COLORS.bgCard : COLORS.bgSoft;
+                  }
+                }}
+              >
+                {/* Rank */}
+                <div style={{
+                  minWidth: 50,
+                  textAlign: "center",
+                  fontSize: medal ? 28 : 18,
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontWeight: 900,
+                  color: isTop3 ? COLORS.gold : COLORS.body,
+                  opacity: isTop3 ? 1 : 0.7,
+                }}>
+                  {medal || `#${entry.rank}`}
+                </div>
+
+                {/* Avatar */}
+                <div style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: "50%",
+                  background: isMe ? COLORS.greenGlow : COLORS.bg,
+                  border: `1px solid ${isMe ? COLORS.green : COLORS.hairline}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 14,
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontWeight: 900,
+                  color: isMe ? COLORS.green : COLORS.body,
+                  flexShrink: 0,
+                }}>
+                  {entry.display_name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+                </div>
+
+                {/* Info */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 16,
+                    color: "#F2F5EE",
+                    fontWeight: isMe ? 700 : 500,
+                    marginBottom: 2,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}>
+                    {entry.display_name} {isMe && <span style={{ color: COLORS.green, fontSize: 11 }}>(YOU)</span>}
+                  </div>
+                  <div style={{
+                    fontSize: 11,
+                    fontFamily: "'DM Mono', monospace",
+                    color: getLevelColor(entry.level),
+                    opacity: 0.85,
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}>
+                    {entry.level}
+                    {entry.favorite_club && (
+                      <span style={{ color: COLORS.body, opacity: 0.5 }}> · {entry.favorite_club}</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Score */}
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{
+                    fontSize: 22,
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontWeight: 900,
+                    color: isMe ? COLORS.green : (isTop3 ? COLORS.gold : "#F2F5EE"),
+                  }}>
+                    {Math.round(entry.total_score).toLocaleString()}
+                  </div>
+                  <div style={{
+                    fontSize: 9,
+                    fontFamily: "'DM Mono', monospace",
+                    color: COLORS.body,
+                    opacity: 0.5,
+                    letterSpacing: "0.15em",
+                  }}>
+                    PTS
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Footer info */}
+      {data && data.leaderboard.length > 0 && (
+        <div style={{
+          marginTop: 32,
+          padding: 20,
+          background: COLORS.bgSoft,
+          border: `1px solid ${COLORS.hairline}`,
+          borderRadius: 4,
+          textAlign: "center",
+        }}>
+          <div style={{
+            fontSize: 11,
+            fontFamily: "'DM Mono', monospace",
+            color: COLORS.gold,
+            letterSpacing: "0.15em",
+            marginBottom: 8,
+          }}>
+            🏆 CAMPAIGN PRIZE
+          </div>
+          <div style={{ fontSize: 14, color: "#F2F5EE", marginBottom: 6 }}>
+            Top fan wins the <strong style={{ color: COLORS.green }}>Ultimate Football Experience</strong>
+          </div>
+          <div style={{ fontSize: 12, color: COLORS.body, opacity: 0.6 }}>
+            Including 424pass package, partner club VIP weekend, and exclusive memorabilia
+          </div>
+        </div>
+      )}
     </div>
   );
 }

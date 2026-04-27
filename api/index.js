@@ -1,83 +1,144 @@
-// Vercel Serverless Function - Single API handler
-// This handles all /api/* routes
+// ============================================================================
+// FOFA API - MongoDB-Powered Production Backend
+// Full feature set with persistent storage and leaderboard
+// ============================================================================
 
 import jwt from "jsonwebtoken";
 import bcryptjs from "bcryptjs";
-import fs from "fs";
-import path from "path";
+import mongoose from "mongoose";
 
 const JWT_SECRET = process.env.JWT_SECRET || "fofa-prod-secret-key-change-this";
-const DATA_DIR = "/tmp/fofa-data";
+const MONGODB_URI = process.env.MONGODB_URI;
 
-// Database (in-memory + file persistence)
-let db = {
-  users: {},
-  activities: [],
-  nextUserId: 1,
-  nextActivityId: 1,
-};
+// ============================================================================
+// MONGOOSE CONNECTION (with caching for serverless)
+// ============================================================================
 
-function initDatabase() {
+let cachedConnection = null;
+
+async function connectDB() {
+  if (cachedConnection && mongoose.connection.readyState === 1) {
+    return cachedConnection;
+  }
+
+  if (!MONGODB_URI) {
+    throw new Error("MONGODB_URI environment variable is not set");
+  }
+
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    const USERS_FILE = path.join(DATA_DIR, "users.json");
-    const ACTIVITIES_FILE = path.join(DATA_DIR, "activities.json");
-
-    if (fs.existsSync(USERS_FILE)) {
-      const data = JSON.parse(fs.readFileSync(USERS_FILE, "utf-8"));
-      db.users = data.users || {};
-      db.nextUserId = data.nextUserId || Object.keys(db.users).length + 1;
-    }
-    if (fs.existsSync(ACTIVITIES_FILE)) {
-      const data = JSON.parse(fs.readFileSync(ACTIVITIES_FILE, "utf-8"));
-      db.activities = data.activities || [];
-      db.nextActivityId = data.nextActivityId || db.activities.length + 1;
-    }
-  } catch (e) {
-    console.error("DB init error:", e.message);
+    cachedConnection = await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+    });
+    console.log("MongoDB connected");
+    return cachedConnection;
+  } catch (err) {
+    console.error("MongoDB connection error:", err);
+    throw err;
   }
 }
 
-function saveDatabase() {
-  try {
-    const USERS_FILE = path.join(DATA_DIR, "users.json");
-    const ACTIVITIES_FILE = path.join(DATA_DIR, "activities.json");
-    fs.writeFileSync(USERS_FILE, JSON.stringify({ users: db.users, nextUserId: db.nextUserId }, null, 2));
-    fs.writeFileSync(ACTIVITIES_FILE, JSON.stringify({ activities: db.activities, nextActivityId: db.nextActivityId }, null, 2));
-  } catch (e) {
-    console.error("DB save error:", e.message);
-  }
+// ============================================================================
+// SCHEMAS
+// ============================================================================
+
+const userSchema = new mongoose.Schema({
+  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  password: { type: String, required: true },
+  username: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  display_name: { type: String, required: true },
+  favorite_club: { type: String, default: "" },
+  bio: { type: String, default: "" },
+  profile_pic: { type: String, default: null },
+  total_score: { type: Number, default: 0, index: true }, // indexed for leaderboard
+  engagement_score: { type: Number, default: 0 },
+  passion_score: { type: Number, default: 0 },
+  knowledge_score: { type: Number, default: 0 },
+  consistency_score: { type: Number, default: 0 },
+  community_score: { type: Number, default: 0 },
+  growth_score: { type: Number, default: 0 },
+  level: { type: String, default: "apprentice" },
+  created_at: { type: Date, default: Date.now },
+  updated_at: { type: Date, default: Date.now },
+});
+
+const activitySchema = new mongoose.Schema({
+  user_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
+  activity_type: { type: String, required: true },
+  description: { type: String, default: "" },
+  points: { type: Number, required: true },
+  created_at: { type: Date, default: Date.now, index: true },
+});
+
+const User = mongoose.models.User || mongoose.model("User", userSchema);
+const Activity = mongoose.models.Activity || mongoose.model("Activity", activitySchema);
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+function calculateLevel(totalScore) {
+  if (totalScore >= 5000) return "legend";
+  if (totalScore >= 3000) return "master";
+  if (totalScore >= 1500) return "veteran";
+  if (totalScore >= 500) return "devotee";
+  if (totalScore >= 100) return "supporter";
+  return "apprentice";
 }
 
-function getUserLoyaltyScores(userId) {
-  const userActivities = db.activities.filter(a => a.user_id === userId);
-  const engagement = userActivities.filter(a => a.activity_type === "engagement").reduce((s, a) => s + a.points, 0);
-  const passion = userActivities.filter(a => a.activity_type === "passion").reduce((s, a) => s + a.points, 0);
-  const knowledge = userActivities.filter(a => a.activity_type === "knowledge").reduce((s, a) => s + a.points, 0);
-  const consistency = userActivities.filter(a => a.activity_type === "consistency").reduce((s, a) => s + a.points, 0);
-  const community = userActivities.filter(a => a.activity_type === "community").reduce((s, a) => s + a.points, 0);
-  const growth = userActivities.filter(a => a.activity_type === "growth").reduce((s, a) => s + a.points, 0);
-  const total = engagement + passion + knowledge + consistency + community + growth;
+async function recalculateUserScores(userId) {
+  const activities = await Activity.find({ user_id: userId });
 
-  let level = "apprentice";
-  if (total >= 5000) level = "legend";
-  else if (total >= 3000) level = "master";
-  else if (total >= 1500) level = "veteran";
-  else if (total >= 500) level = "devotee";
-  else if (total >= 100) level = "supporter";
+  const scores = {
+    engagement_score: 0,
+    passion_score: 0,
+    knowledge_score: 0,
+    consistency_score: 0,
+    community_score: 0,
+    growth_score: 0,
+  };
 
-  return {
-    engagement_score: engagement,
-    passion_score: passion,
-    knowledge_score: knowledge,
-    consistency_score: consistency,
-    community_score: community,
-    growth_score: growth,
-    total_score: total,
+  activities.forEach(a => {
+    const key = `${a.activity_type}_score`;
+    if (scores.hasOwnProperty(key)) {
+      scores[key] += a.points;
+    }
+  });
+
+  const total_score = Object.values(scores).reduce((sum, s) => sum + s, 0);
+  const level = calculateLevel(total_score);
+
+  await User.findByIdAndUpdate(userId, {
+    ...scores,
+    total_score,
     level,
-    updated_at: new Date().toISOString(),
+    updated_at: new Date(),
+  });
+
+  return { ...scores, total_score, level };
+}
+
+function userToPublic(user) {
+  return {
+    id: user._id.toString(),
+    email: user.email,
+    username: user.username,
+    display_name: user.display_name,
+    favorite_club: user.favorite_club,
+    bio: user.bio,
+    profile_pic: user.profile_pic,
+    created_at: user.created_at,
+  };
+}
+
+function userToLeaderboard(user, rank) {
+  return {
+    rank,
+    username: user.username,
+    display_name: user.display_name,
+    favorite_club: user.favorite_club,
+    total_score: user.total_score,
+    level: user.level,
   };
 }
 
@@ -92,9 +153,12 @@ function verifyToken(req) {
   }
 }
 
-// Main Vercel handler
+// ============================================================================
+// MAIN HANDLER
+// ============================================================================
+
 export default async function handler(req, res) {
-  // CORS headers
+  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -103,22 +167,22 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Initialize DB
-  initDatabase();
-
-  // Get path from URL
   const url = req.url || "";
   const pathname = url.split("?")[0];
 
   try {
-    // ============ HEALTH CHECK ============
+    // ============ HEALTH CHECK (no DB needed) ============
     if (pathname === "/api/health" || pathname.endsWith("/health")) {
       return res.status(200).json({
         status: "ok",
-        message: "FOFA API is running on Vercel",
+        message: "FOFA API is running with MongoDB",
         timestamp: new Date().toISOString(),
+        mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
       });
     }
+
+    // Connect to DB for all other endpoints
+    await connectDB();
 
     // ============ REGISTER ============
     if (pathname.endsWith("/auth/register") && req.method === "POST") {
@@ -128,35 +192,34 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: "Email, password, and username required" });
       }
 
-      const exists = Object.values(db.users).find(u => u.email === email || u.username === username);
+      const exists = await User.findOne({
+        $or: [{ email: email.toLowerCase() }, { username: username.toLowerCase() }],
+      });
+
       if (exists) {
         return res.status(409).json({ error: "Email or username already exists" });
       }
 
       const hashedPassword = await bcryptjs.hash(password, 10);
-      const userId = db.nextUserId++;
 
-      db.users[userId] = {
-        id: userId,
-        email,
+      const user = await User.create({
+        email: email.toLowerCase(),
         password: hashedPassword,
-        username,
+        username: username.toLowerCase(),
         display_name: display_name || username,
         favorite_club: favorite_club || "",
-        profile_pic: null,
-        bio: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
+      });
 
-      saveDatabase();
-
-      const token = jwt.sign({ userId, email, username }, JWT_SECRET, { expiresIn: "30d" });
+      const token = jwt.sign(
+        { userId: user._id.toString(), email: user.email, username: user.username },
+        JWT_SECRET,
+        { expiresIn: "30d" }
+      );
 
       return res.status(201).json({
         message: "User registered successfully",
         token,
-        user: { id: userId, email, username, display_name: display_name || username },
+        user: userToPublic(user),
       });
     }
 
@@ -168,7 +231,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: "Email and password required" });
       }
 
-      const user = Object.values(db.users).find(u => u.email === email);
+      const user = await User.findOne({ email: email.toLowerCase() });
       if (!user) {
         return res.status(401).json({ error: "Invalid email or password" });
       }
@@ -178,18 +241,16 @@ export default async function handler(req, res) {
         return res.status(401).json({ error: "Invalid email or password" });
       }
 
-      const token = jwt.sign({ userId: user.id, email: user.email, username: user.username }, JWT_SECRET, { expiresIn: "30d" });
+      const token = jwt.sign(
+        { userId: user._id.toString(), email: user.email, username: user.username },
+        JWT_SECRET,
+        { expiresIn: "30d" }
+      );
 
       return res.status(200).json({
         message: "Logged in successfully",
         token,
-        user: {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          display_name: user.display_name,
-          favorite_club: user.favorite_club,
-        },
+        user: userToPublic(user),
       });
     }
 
@@ -198,23 +259,26 @@ export default async function handler(req, res) {
       const decoded = verifyToken(req);
       if (!decoded) return res.status(401).json({ error: "Unauthorized" });
 
-      const user = db.users[decoded.userId];
+      const user = await User.findById(decoded.userId);
       if (!user) return res.status(404).json({ error: "User not found" });
 
-      const scores = getUserLoyaltyScores(decoded.userId);
+      // Get user's rank
+      const rank = await User.countDocuments({ total_score: { $gt: user.total_score } }) + 1;
 
       return res.status(200).json({
-        user: {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          display_name: user.display_name,
-          favorite_club: user.favorite_club,
-          bio: user.bio,
-          profile_pic: user.profile_pic,
-          created_at: user.created_at,
+        user: userToPublic(user),
+        loyalty: {
+          engagement_score: user.engagement_score,
+          passion_score: user.passion_score,
+          knowledge_score: user.knowledge_score,
+          consistency_score: user.consistency_score,
+          community_score: user.community_score,
+          growth_score: user.growth_score,
+          total_score: user.total_score,
+          level: user.level,
+          rank,
+          updated_at: user.updated_at,
         },
-        loyalty: scores,
       });
     }
 
@@ -224,28 +288,19 @@ export default async function handler(req, res) {
       if (!decoded) return res.status(401).json({ error: "Unauthorized" });
 
       const { display_name, bio, favorite_club, profile_pic } = req.body || {};
-      const user = db.users[decoded.userId];
+      const updates = { updated_at: new Date() };
+
+      if (display_name) updates.display_name = display_name;
+      if (bio !== undefined) updates.bio = bio;
+      if (favorite_club !== undefined) updates.favorite_club = favorite_club;
+      if (profile_pic) updates.profile_pic = profile_pic;
+
+      const user = await User.findByIdAndUpdate(decoded.userId, updates, { new: true });
       if (!user) return res.status(404).json({ error: "User not found" });
-
-      if (display_name) user.display_name = display_name;
-      if (bio !== undefined) user.bio = bio;
-      if (favorite_club) user.favorite_club = favorite_club;
-      if (profile_pic) user.profile_pic = profile_pic;
-      user.updated_at = new Date().toISOString();
-
-      saveDatabase();
 
       return res.status(200).json({
         message: "Profile updated",
-        user: {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          display_name: user.display_name,
-          favorite_club: user.favorite_club,
-          bio: user.bio,
-          profile_pic: user.profile_pic,
-        },
+        user: userToPublic(user),
       });
     }
 
@@ -259,20 +314,25 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: "activity_type and points required" });
       }
 
-      const activity = {
-        id: db.nextActivityId++,
+      const validTypes = ["engagement", "passion", "knowledge", "consistency", "community", "growth"];
+      if (!validTypes.includes(activity_type)) {
+        return res.status(400).json({ error: "Invalid activity_type" });
+      }
+
+      await Activity.create({
         user_id: decoded.userId,
         activity_type,
         description: description || "",
-        points,
-        created_at: new Date().toISOString(),
-      };
+        points: parseInt(points),
+      });
 
-      db.activities.push(activity);
-      saveDatabase();
+      // Recalculate user's scores
+      const scores = await recalculateUserScores(decoded.userId);
 
-      const scores = getUserLoyaltyScores(decoded.userId);
-      return res.status(200).json({ message: "Activity logged", loyalty: scores });
+      return res.status(200).json({
+        message: "Activity logged",
+        loyalty: scores,
+      });
     }
 
     // ============ GET SCORES ============
@@ -280,31 +340,129 @@ export default async function handler(req, res) {
       const decoded = verifyToken(req);
       if (!decoded) return res.status(401).json({ error: "Unauthorized" });
 
-      const scores = getUserLoyaltyScores(decoded.userId);
-      const recent_activities = db.activities
-        .filter(a => a.user_id === decoded.userId)
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-        .slice(0, 20);
+      const user = await User.findById(decoded.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
 
-      return res.status(200).json({ scores, recent_activities });
+      const recent_activities = await Activity.find({ user_id: decoded.userId })
+        .sort({ created_at: -1 })
+        .limit(20);
+
+      const rank = await User.countDocuments({ total_score: { $gt: user.total_score } }) + 1;
+
+      return res.status(200).json({
+        scores: {
+          engagement_score: user.engagement_score,
+          passion_score: user.passion_score,
+          knowledge_score: user.knowledge_score,
+          consistency_score: user.consistency_score,
+          community_score: user.community_score,
+          growth_score: user.growth_score,
+          total_score: user.total_score,
+          level: user.level,
+          rank,
+          updated_at: user.updated_at,
+        },
+        recent_activities: recent_activities.map(a => ({
+          id: a._id.toString(),
+          activity_type: a.activity_type,
+          description: a.description,
+          points: a.points,
+          created_at: a.created_at,
+        })),
+      });
     }
 
-    // ============ GET ACTIVITIES ============
+    // ============ GET ACTIVITIES (full history) ============
     if (pathname.endsWith("/loyalty/activities") && req.method === "GET") {
       const decoded = verifyToken(req);
       if (!decoded) return res.status(401).json({ error: "Unauthorized" });
 
-      const activities = db.activities
-        .filter(a => a.user_id === decoded.userId)
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      const activities = await Activity.find({ user_id: decoded.userId })
+        .sort({ created_at: -1 });
 
-      return res.status(200).json({ activities });
+      return res.status(200).json({
+        activities: activities.map(a => ({
+          id: a._id.toString(),
+          activity_type: a.activity_type,
+          description: a.description,
+          points: a.points,
+          created_at: a.created_at,
+        })),
+      });
+    }
+
+    // ============ LEADERBOARD (NEW!) ============
+    if (pathname.endsWith("/leaderboard") && req.method === "GET") {
+      const queryString = url.includes("?") ? url.split("?")[1] : "";
+      const params = new URLSearchParams(queryString);
+      const limit = Math.min(parseInt(params.get("limit") || "100"), 500);
+      const filterClub = params.get("club");
+
+      const query = filterClub ? { favorite_club: filterClub } : {};
+
+      const users = await User.find(query)
+        .sort({ total_score: -1 })
+        .limit(limit)
+        .select("username display_name favorite_club total_score level created_at");
+
+      // Get auth context for "your rank" feature (optional)
+      const decoded = verifyToken(req);
+      let myRank = null;
+      let myUser = null;
+
+      if (decoded) {
+        myUser = await User.findById(decoded.userId);
+        if (myUser) {
+          myRank = await User.countDocuments({
+            total_score: { $gt: myUser.total_score },
+            ...(filterClub ? { favorite_club: filterClub } : {}),
+          }) + 1;
+        }
+      }
+
+      const totalUsers = await User.countDocuments(query);
+
+      return res.status(200).json({
+        leaderboard: users.map((user, i) => userToLeaderboard(user, i + 1)),
+        meta: {
+          total_users: totalUsers,
+          showing: users.length,
+          filter_club: filterClub || null,
+        },
+        you: myUser ? {
+          rank: myRank,
+          username: myUser.username,
+          display_name: myUser.display_name,
+          total_score: myUser.total_score,
+          level: myUser.level,
+        } : null,
+      });
+    }
+
+    // ============ STATS (overall platform stats) ============
+    if (pathname.endsWith("/stats") && req.method === "GET") {
+      const totalUsers = await User.countDocuments();
+      const totalActivities = await Activity.countDocuments();
+      const topUser = await User.findOne().sort({ total_score: -1 }).select("display_name total_score level");
+
+      return res.status(200).json({
+        total_users: totalUsers,
+        total_activities: totalActivities,
+        top_user: topUser ? {
+          display_name: topUser.display_name,
+          total_score: topUser.total_score,
+          level: topUser.level,
+        } : null,
+      });
     }
 
     // Not found
     return res.status(404).json({ error: "Endpoint not found", path: pathname });
   } catch (error) {
     console.error("API error:", error);
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({
+      error: error.message,
+      type: error.name,
+    });
   }
 }

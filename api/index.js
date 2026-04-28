@@ -51,6 +51,10 @@ const userSchema = new mongoose.Schema({
   community_score: { type: Number, default: 0 },
   growth_score: { type: Number, default: 0 },
   level: { type: String, default: "apprentice" },
+  // Referral system
+  referral_code: { type: String, unique: true, sparse: true, index: true },
+  referred_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+  referral_count: { type: Number, default: 0, index: true },
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now },
 });
@@ -75,6 +79,26 @@ function calculateLevel(totalScore) {
   return "apprentice";
 }
 
+function generateReferralCode(username) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // No confusing chars (0/O, 1/I, etc.)
+  let code = "";
+  for (let i = 0; i < 5; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  const cleanUsername = username.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+  return `FOFA-${cleanUsername}-${code}`;
+}
+
+async function ensureUniqueReferralCode(username) {
+  for (let i = 0; i < 5; i++) {
+    const code = generateReferralCode(username);
+    const exists = await User.findOne({ referral_code: code });
+    if (!exists) return code;
+  }
+  // Fallback: use timestamp
+  return `FOFA-${username.toUpperCase().slice(0, 8)}-${Date.now().toString(36).toUpperCase()}`;
+}
+
 async function recalculateUserScores(userId) {
   const activities = await Activity.find({ user_id: userId });
   const scores = {
@@ -96,6 +120,8 @@ function userToPublic(user) {
     id: user._id.toString(), email: user.email, username: user.username,
     display_name: user.display_name, favorite_club: user.favorite_club,
     bio: user.bio, profile_pic: user.profile_pic, created_at: user.created_at,
+    referral_code: user.referral_code,
+    referral_count: user.referral_count || 0,
   };
 }
 
@@ -165,14 +191,31 @@ export default async function handler(req, res) {
     await connectDB();
 
     if (pathname.endsWith("/auth/register") && req.method === "POST") {
-      const { email, password, username, display_name, favorite_club } = req.body || {};
+      const { email, password, username, display_name, favorite_club, referral_code } = req.body || {};
       if (!email || !password || !username) return res.status(400).json({ error: "Email, password, and username required" });
       const exists = await User.findOne({ $or: [{ email: email.toLowerCase() }, { username: username.toLowerCase() }] });
       if (exists) return res.status(409).json({ error: "Email or username already exists" });
+      
+      // Check referral code if provided
+      let referrer = null;
+      if (referral_code) {
+        referrer = await User.findOne({ referral_code: referral_code.toUpperCase().trim() });
+        if (!referrer) {
+          return res.status(400).json({ error: "Invalid referral code" });
+        }
+      }
+      
       const hashedPassword = await bcryptjs.hash(password, 10);
+      const userReferralCode = await ensureUniqueReferralCode(username);
+      
       const user = await User.create({
-        email: email.toLowerCase(), password: hashedPassword, username: username.toLowerCase(),
-        display_name: display_name || username, favorite_club: favorite_club || "",
+        email: email.toLowerCase(),
+        password: hashedPassword,
+        username: username.toLowerCase(),
+        display_name: display_name || username,
+        favorite_club: favorite_club || "",
+        referral_code: userReferralCode,
+        referred_by: referrer ? referrer._id : null,
       });
       
       // 🎉 Welcome bonus: +50 points to engagement
@@ -182,11 +225,46 @@ export default async function handler(req, res) {
         description: "Welcome to FOFA! 🎉",
         points: 50,
       });
+      
+      // 🎁 If referred, give bonus to both
+      if (referrer) {
+        // Referee bonus: +25 passion (welcomed via friend)
+        await Activity.create({
+          user_id: user._id,
+          activity_type: "passion",
+          description: `Joined via referral from @${referrer.username}`,
+          points: 25,
+        });
+        
+        // Referrer reward: +50 growth (brought a new fan!)
+        await Activity.create({
+          user_id: referrer._id,
+          activity_type: "growth",
+          description: `Referred new fan: ${user.display_name}`,
+          points: 50,
+        });
+        
+        // Increment referrer's count
+        await User.findByIdAndUpdate(referrer._id, {
+          $inc: { referral_count: 1 },
+          updated_at: new Date(),
+        });
+        
+        // Recalculate referrer's scores
+        await recalculateUserScores(referrer._id);
+      }
+      
       await recalculateUserScores(user._id);
       
       const token = jwt.sign({ userId: user._id.toString(), email: user.email, username: user.username }, JWT_SECRET, { expiresIn: "30d" });
       const updatedUser = await User.findById(user._id);
-      return res.status(201).json({ message: "User registered successfully", token, user: userToPublic(updatedUser), is_new_user: true });
+      return res.status(201).json({
+        message: "User registered successfully",
+        token,
+        user: userToPublic(updatedUser),
+        is_new_user: true,
+        referred_by: referrer ? { username: referrer.username, display_name: referrer.display_name } : null,
+      });
     }
 
     if (pathname.endsWith("/auth/login") && req.method === "POST") {
@@ -332,6 +410,98 @@ export default async function handler(req, res) {
           level: topUser.level,
           favorite_club: topUser.favorite_club,
         } : null,
+      });
+    }
+
+    // ============ REFERRAL ENDPOINTS ============
+    
+    // Get my referral info
+    if (pathname.endsWith("/referrals/me") && req.method === "GET") {
+      const decoded = verifyToken(req);
+      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
+      
+      const user = await User.findById(decoded.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      
+      // Generate code if missing (for old users created before referral system)
+      if (!user.referral_code) {
+        const newCode = await ensureUniqueReferralCode(user.username);
+        user.referral_code = newCode;
+        await user.save();
+      }
+      
+      // Get list of users who used my code
+      const referredUsers = await User.find({ referred_by: user._id })
+        .sort({ created_at: -1 })
+        .select("username display_name favorite_club total_score level created_at");
+      
+      // Get my rank among referrers
+      const myRank = await User.countDocuments({
+        referral_count: { $gt: user.referral_count }
+      }) + 1;
+      
+      return res.status(200).json({
+        referral_code: user.referral_code,
+        referral_link: `https://fofa-xi.vercel.app/#join?ref=${user.referral_code}`,
+        referral_count: user.referral_count || 0,
+        recruiter_rank: myRank,
+        referred_users: referredUsers.map(u => ({
+          username: u.username,
+          display_name: u.display_name,
+          favorite_club: u.favorite_club,
+          total_score: u.total_score,
+          level: u.level,
+          joined: u.created_at,
+        })),
+        points_earned: (user.referral_count || 0) * 50,
+      });
+    }
+    
+    // Top recruiters leaderboard
+    if (pathname.endsWith("/referrals/leaderboard") && req.method === "GET") {
+      const queryString = url.includes("?") ? url.split("?")[1] : "";
+      const params = new URLSearchParams(queryString);
+      const limit = Math.min(parseInt(params.get("limit") || "20"), 100);
+      
+      const recruiters = await User.find({ referral_count: { $gt: 0 } })
+        .sort({ referral_count: -1, total_score: -1 })
+        .limit(limit)
+        .select("username display_name favorite_club referral_count total_score level");
+      
+      return res.status(200).json({
+        recruiters: recruiters.map((u, i) => ({
+          rank: i + 1,
+          username: u.username,
+          display_name: u.display_name,
+          favorite_club: u.favorite_club,
+          referral_count: u.referral_count,
+          total_score: u.total_score,
+          level: u.level,
+        })),
+      });
+    }
+    
+    // Validate referral code (used by registration form to show "Referred by X")
+    if (pathname.includes("/referrals/validate") && req.method === "GET") {
+      const queryString = url.includes("?") ? url.split("?")[1] : "";
+      const params = new URLSearchParams(queryString);
+      const code = (params.get("code") || "").toUpperCase().trim();
+      
+      if (!code) return res.status(400).json({ valid: false, error: "Code required" });
+      
+      const referrer = await User.findOne({ referral_code: code });
+      if (!referrer) {
+        return res.status(404).json({ valid: false, error: "Invalid referral code" });
+      }
+      
+      return res.status(200).json({
+        valid: true,
+        referrer: {
+          username: referrer.username,
+          display_name: referrer.display_name,
+          favorite_club: referrer.favorite_club,
+          level: referrer.level,
+        },
       });
     }
 

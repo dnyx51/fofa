@@ -11,7 +11,11 @@ function App() {
   useEffect(() => {
     const updateView = () => {
       const hash = window.location.hash
-      if (hash === '#portal') {
+      // #join?ref=CODE goes to portal as register
+      if (hash.startsWith('#join')) {
+        // Convert to #portal but keep query params, AuthForm will read ?ref= itself
+        setCurrentView('portal')
+      } else if (hash === '#portal' || hash.startsWith('#portal?')) {
         setCurrentView('portal')
       } else if (hash === '#admin') {
         setCurrentView('admin')

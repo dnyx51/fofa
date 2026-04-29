@@ -984,7 +984,7 @@ export default function FOFA() {
                   <path d="M0 5 L18 5 M14 1 L18 5 L14 9" stroke="currentColor" strokeWidth="1.5" />
                 </svg>
               </a>
-              <a href="#" className="cta-ghost">For Clubs</a>
+              <a href="#clubs/apply" className="cta-ghost">For Clubs</a>
               <a href="#" className="cta-ghost">For Experts</a>
             </div>
           </Reveal>

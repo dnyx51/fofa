@@ -343,6 +343,7 @@ export default function FOFA() {
           <a href="#development" className="nav-link">II. Development</a>
           <a href="#unity" className="nav-link">III. Unity</a>
           <a href="#join" className="nav-link">Join</a>
+          <a href="#clubs/apply" className="nav-link">For Clubs</a>
         </div>
       </nav>
 

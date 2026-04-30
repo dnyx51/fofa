@@ -333,6 +333,7 @@ function Dashboard({ data, activeTab, setActiveTab, token }) {
     { id: "overview", label: "Overview" },
     { id: "users", label: "Users" },
     { id: "clubs", label: "🏟️ Club Applications" },
+    { id: "experts", label: "🎓 Expert Applications" },
   ];
 
   return (
@@ -372,6 +373,7 @@ function Dashboard({ data, activeTab, setActiveTab, token }) {
       {activeTab === "overview" && <OverviewTab data={data} />}
       {activeTab === "users" && <UsersTab token={token} />}
       {activeTab === "clubs" && <ClubsApplicationsTab token={token} />}
+      {activeTab === "experts" && <ExpertsApplicationsTab token={token} />}
     </div>
   );
 }
@@ -1678,6 +1680,250 @@ function CheckPill({ label, value }) {
       <span style={{ color: COLORS.body, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase" }}>
         {label}
       </span>
+    </div>
+  );
+}
+
+// ============================================================================
+// EXPERTS APPLICATIONS TAB
+// ============================================================================
+
+function ExpertsApplicationsTab({ token }) {
+  const [applications, setApplications] = useState([]);
+  const [counts, setCounts] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [selectedApp, setSelectedApp] = useState(null);
+  const [tier, setTier] = useState("authority");
+  const [isFeatured, setIsFeatured] = useState(false);
+
+  useEffect(() => { fetchApplications(); }, [filterStatus]);
+
+  async function fetchApplications() {
+    setLoading(true);
+    try {
+      const url = filterStatus === "all" ? `${API_URL}/admin/experts/applications` : `${API_URL}/admin/experts/applications?status=${filterStatus}`;
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await response.json();
+      setApplications(data.applications || []);
+      setCounts(data.counts || {});
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
+  }
+
+  async function viewApplication(id) {
+    try {
+      const response = await fetch(`${API_URL}/admin/experts/applications/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await response.json();
+      setSelectedApp(data.application);
+    } catch (err) { console.error(err); }
+  }
+
+  async function approveApplication(id) {
+    if (!confirm(`Approve as ${tier} expert${isFeatured ? " (FEATURED)" : ""}?`)) return;
+    try {
+      const response = await fetch(`${API_URL}/admin/experts/applications/${id}/approve`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ tier, is_featured: isFeatured }),
+      });
+      if (!response.ok) throw new Error("Approval failed");
+      const data = await response.json();
+      alert(`✅ Expert approved! Profile: ${data.expert.public_url}`);
+      setSelectedApp(null);
+      setTier("authority");
+      setIsFeatured(false);
+      fetchApplications();
+    } catch (err) { alert(`Error: ${err.message}`); }
+  }
+
+  async function rejectApplication(id) {
+    const reason = prompt("Reason for rejection:");
+    if (!reason) return;
+    try {
+      const response = await fetch(`${API_URL}/admin/experts/applications/${id}/reject`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: reason }),
+      });
+      if (!response.ok) throw new Error("Rejection failed");
+      alert("Application rejected");
+      setSelectedApp(null);
+      fetchApplications();
+    } catch (err) { alert(`Error: ${err.message}`); }
+  }
+
+  function timeAgo(dateStr) {
+    const diff = (new Date() - new Date(dateStr)) / 1000;
+    if (diff < 60) return `${Math.round(diff)}s ago`;
+    if (diff < 3600) return `${Math.round(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.round(diff / 3600)}h ago`;
+    return `${Math.round(diff / 86400)}d ago`;
+  }
+
+  function statusColor(s) {
+    return { pending: COLORS.body, ai_reviewing: COLORS.gold, needs_human_review: COLORS.gold, approved: COLORS.green, rejected: COLORS.red }[s] || COLORS.body;
+  }
+
+  function statusEmoji(s) {
+    return { pending: "⏳", ai_reviewing: "🤖", needs_human_review: "⚠️", approved: "✅", rejected: "❌" }[s] || "❓";
+  }
+
+  function typeIcon(t) {
+    return { verifier: "🛡️", voice: "📢", ambassador: "🎖️" }[t] || "🎓";
+  }
+
+  if (selectedApp) {
+    const ai = selectedApp.ai_verification || {};
+    return (
+      <div>
+        <button onClick={() => setSelectedApp(null)} style={{ background: "transparent", border: `1px solid ${COLORS.hairline}`, color: COLORS.body, padding: "8px 14px", borderRadius: 4, fontSize: 11, fontFamily: "'DM Mono', monospace", letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer", marginBottom: 24 }}>
+          ← Back to list
+        </button>
+        
+        <div style={{ marginBottom: 32 }}>
+          <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 36, fontWeight: 900, color: "#F2F5EE", margin: "0 0 8px" }}>
+            {typeIcon(selectedApp.expert_type)} {selectedApp.full_name}
+          </h2>
+          <p style={{ color: COLORS.body, opacity: 0.7, margin: 0, fontSize: 14 }}>
+            {selectedApp.country} · {selectedApp.expert_type.toUpperCase()}
+            {selectedApp.current_role && ` · ${selectedApp.current_role}`}
+          </p>
+        </div>
+
+        {ai.decision && (
+          <div style={{ background: COLORS.bgSoft, border: `1px solid ${ai.decision === "approved" ? COLORS.green : ai.decision === "rejected" ? COLORS.red : COLORS.gold}`, borderRadius: 4, padding: 20, marginBottom: 24 }}>
+            <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: ai.decision === "approved" ? COLORS.green : ai.decision === "rejected" ? COLORS.red : COLORS.gold, letterSpacing: "0.2em", marginBottom: 12 }}>
+              🤖 AI VERIFICATION · {ai.decision.toUpperCase()} · {Math.round((ai.confidence || 0) * 100)}% CONFIDENCE
+            </div>
+            <p style={{ color: "#F2F5EE", fontSize: 14, margin: "0 0 16px", lineHeight: 1.6 }}>{ai.reasoning}</p>
+            {ai.checks?.red_flags && ai.checks.red_flags.length > 0 && (
+              <div style={{ padding: 12, background: "rgba(255, 71, 87, 0.1)", borderRadius: 4, fontSize: 12, color: COLORS.red, fontFamily: "'DM Mono', monospace" }}>
+                🚩 RED FLAGS: {ai.checks.red_flags.join(", ")}
+              </div>
+            )}
+          </div>
+        )}
+
+        <DetailSection title="Background">
+          <DetailField label="Full Name">{selectedApp.full_name}</DetailField>
+          <DetailField label="Display Name">{selectedApp.display_name}</DetailField>
+          <DetailField label="Email">{selectedApp.email}</DetailField>
+          <DetailField label="Phone">{selectedApp.phone || "—"}</DetailField>
+          <DetailField label="Country">{selectedApp.country}</DetailField>
+          <DetailField label="Region Focus">{selectedApp.region_focus || "—"}</DetailField>
+          <DetailField label="Current Role">{selectedApp.current_role || "—"}</DetailField>
+          <DetailField label="Years in Football">{selectedApp.years_in_football || "—"}</DetailField>
+          <DetailField label="Professional Background" full>{selectedApp.professional_background}</DetailField>
+        </DetailSection>
+
+        <DetailSection title="Affiliations & Expertise">
+          <DetailField label="Clubs Supported" full>{(selectedApp.clubs_supported || []).join(", ") || "—"}</DetailField>
+          <DetailField label="Expertise Areas" full>{(selectedApp.expertise_areas || []).join(", ") || "—"}</DetailField>
+        </DetailSection>
+
+        <DetailSection title="Online Presence">
+          <DetailField label="Website">{selectedApp.website ? <a href={selectedApp.website} target="_blank" rel="noopener" style={{ color: COLORS.green }}>{selectedApp.website}</a> : "—"}</DetailField>
+          <DetailField label="Twitter">{selectedApp.social_twitter || "—"}</DetailField>
+          <DetailField label="LinkedIn">{selectedApp.social_linkedin || "—"}</DetailField>
+          <DetailField label="YouTube">{selectedApp.social_youtube || "—"}</DetailField>
+          <DetailField label="Followers">{selectedApp.follower_count ? selectedApp.follower_count.toLocaleString() : "—"}</DetailField>
+        </DetailSection>
+
+        <DetailSection title="Vision">
+          <DetailField label="Why FOFA?" full>{selectedApp.why_fofa}</DetailField>
+          <DetailField label="What They Offer" full>{selectedApp.what_they_offer}</DetailField>
+          {selectedApp.references && <DetailField label="References" full>{selectedApp.references}</DetailField>}
+        </DetailSection>
+
+        {(selectedApp.status === "needs_human_review" || selectedApp.status === "ai_reviewing") && (
+          <div style={{ marginTop: 32, padding: 20, background: COLORS.bgSoft, border: `1px solid ${COLORS.hairline}`, borderRadius: 4 }}>
+            <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.gold, letterSpacing: "0.2em", marginBottom: 16 }}>APPROVAL OPTIONS</div>
+            <div style={{ display: "flex", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
+              <div>
+                <label style={{ display: "block", fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.7, letterSpacing: "0.1em", marginBottom: 6 }}>TIER</label>
+                <select value={tier} onChange={e => setTier(e.target.value)} style={{ background: COLORS.bg, border: `1px solid ${COLORS.hairlineStrong}`, color: "#F2F5EE", padding: "8px 12px", borderRadius: 4 }}>
+                  <option value="legend">🌟 Legend</option>
+                  <option value="authority">⭐ Authority</option>
+                  <option value="ambassador">🎖️ Ambassador</option>
+                </select>
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 22 }}>
+                <input type="checkbox" checked={isFeatured} onChange={e => setIsFeatured(e.target.checked)} />
+                <span style={{ fontSize: 12, color: COLORS.body, fontFamily: "'DM Mono', monospace", letterSpacing: "0.1em", textTransform: "uppercase" }}>Feature on homepage</span>
+              </label>
+            </div>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <button onClick={() => approveApplication(selectedApp._id)} style={{ flex: 1, minWidth: 200, background: COLORS.green, color: COLORS.bg, border: "none", padding: "14px 24px", fontSize: 13, fontFamily: "'DM Mono', monospace", letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700, borderRadius: 4, cursor: "pointer" }}>
+                ✅ Approve as Expert
+              </button>
+              <button onClick={() => rejectApplication(selectedApp._id)} style={{ flex: 1, minWidth: 200, background: "transparent", color: COLORS.red, border: `1px solid ${COLORS.red}`, padding: "14px 24px", fontSize: 13, fontFamily: "'DM Mono', monospace", letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700, borderRadius: 4, cursor: "pointer" }}>
+                ❌ Reject
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h2 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 28, fontWeight: 900, color: "#F2F5EE", margin: "0 0 24px" }}>
+        Expert Applications
+      </h2>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
+        {[
+          { id: "all", label: "All", count: Object.values(counts).reduce((s, n) => s + n, 0) },
+          { id: "needs_human_review", label: "Needs Review", count: counts.needs_human_review || 0 },
+          { id: "approved", label: "Approved", count: counts.approved || 0 },
+          { id: "rejected", label: "Rejected", count: counts.rejected || 0 },
+        ].map(filter => (
+          <button key={filter.id} onClick={() => setFilterStatus(filter.id)}
+            style={{ padding: "10px 14px", background: filterStatus === filter.id ? COLORS.greenGlow : "transparent", border: `1px solid ${filterStatus === filter.id ? COLORS.green : COLORS.hairline}`, color: filterStatus === filter.id ? COLORS.green : COLORS.body, fontSize: 11, fontFamily: "'DM Mono', monospace", borderRadius: 100, cursor: "pointer", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            {filter.label} {filter.count > 0 && <span style={{ opacity: 0.7 }}>({filter.count})</span>}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: 100 }} />)}
+        </div>
+      ) : applications.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 60, background: COLORS.bgSoft, border: `1px solid ${COLORS.hairline}`, borderRadius: 4 }}>
+          <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.4 }}>🎓</div>
+          <div style={{ color: COLORS.body, fontSize: 14 }}>No expert applications yet.</div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {applications.map(app => (
+            <div key={app.id} onClick={() => viewApplication(app.id)}
+              style={{ background: COLORS.bgSoft, border: `1px solid ${COLORS.hairline}`, borderRadius: 4, padding: 20, cursor: "pointer", transition: "all 0.2s", display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = COLORS.green; e.currentTarget.style.background = COLORS.bgCard; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = COLORS.hairline; e.currentTarget.style.background = COLORS.bgSoft; }}>
+              <div style={{ fontSize: 24 }}>{statusEmoji(app.status)}</div>
+              <div style={{ fontSize: 28 }}>{typeIcon(app.expert_type)}</div>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontSize: 16, color: "#F2F5EE", fontWeight: 500, marginBottom: 4 }}>{app.full_name}</div>
+                <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.6, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                  {app.expert_type} · {app.country}
+                  {app.current_role && ` · ${app.current_role}`}
+                </div>
+              </div>
+              <div style={{ minWidth: 120, textAlign: "right" }}>
+                <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: statusColor(app.status), letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700 }}>
+                  {app.status.replace(/_/g, " ")}
+                </div>
+                <div style={{ fontSize: 10, color: COLORS.body, opacity: 0.4, fontFamily: "'DM Mono', monospace", marginTop: 4 }}>
+                  {timeAgo(app.submitted_at)}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

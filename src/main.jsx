@@ -6,6 +6,8 @@ import AdminDashboard from './AdminDashboard.jsx'
 import PublicLeaderboard from './PublicLeaderboard.jsx'
 import ClubApplyForm from './ClubApplyForm.jsx'
 import ClubsPage from './ClubsPage.jsx'
+import ExpertsPage from './ExpertsPage.jsx'
+import ExpertApplyForm from './ExpertApplyForm.jsx'
 
 function App() {
   const [currentView, setCurrentView] = useState('site')
@@ -14,11 +16,14 @@ function App() {
     const updateView = () => {
       const hash = window.location.hash
       
-      // Routes (order matters - more specific first)
-      if (hash === '#clubs/apply' || hash === '#apply') {
+      // Routes - more specific first
+      if (hash === '#experts/apply') {
+        setCurrentView('experts-apply')
+      } else if (hash === '#experts' || hash.match(/^#experts\/[a-z0-9-]+$/)) {
+        setCurrentView('experts')
+      } else if (hash === '#clubs/apply' || hash === '#apply') {
         setCurrentView('clubs-apply')
       } else if (hash === '#clubs' || hash.match(/^#clubs\/[a-z0-9-]+$/)) {
-        // #clubs OR #clubs/[slug]
         setCurrentView('clubs')
       } else if (hash.startsWith('#join')) {
         setCurrentView('portal')
@@ -46,6 +51,8 @@ function App() {
       {currentView === 'leaders' && <PublicLeaderboard />}
       {currentView === 'clubs-apply' && <ClubApplyForm />}
       {currentView === 'clubs' && <ClubsPage />}
+      {currentView === 'experts' && <ExpertsPage />}
+      {currentView === 'experts-apply' && <ExpertApplyForm />}
     </>
   )
 }

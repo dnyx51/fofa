@@ -192,10 +192,179 @@ const clubSchema = new mongoose.Schema({
   updated_at: { type: Date, default: Date.now },
 });
 
+// ============================================================================
+// EXPERT APPLICATION SCHEMA
+// ============================================================================
+
+const expertApplicationSchema = new mongoose.Schema({
+  // Submitter (optional - if logged in)
+  submitted_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+  
+  // Personal info
+  full_name: { type: String, required: true, trim: true },
+  display_name: { type: String, required: true, trim: true },
+  email: { type: String, required: true, lowercase: true, trim: true },
+  phone: { type: String },
+  country: { type: String, required: true },
+  
+  // Role they're applying for
+  expert_type: {
+    type: String,
+    enum: ["verifier", "voice", "ambassador"],
+    required: true,
+  },
+  
+  // Their connection to football
+  professional_background: { type: String, required: true }, // "Ex-PGMOL referee, 20 years"
+  current_role: { type: String }, // "Sky Sports pundit"
+  years_in_football: { type: Number },
+  
+  // Specialty / focus
+  clubs_supported: { type: [String], default: [] }, // Clubs they support/follow
+  expertise_areas: { type: [String], default: [] }, // ["Refereeing", "Tactics", "Youth Development"]
+  region_focus: { type: String }, // "England" or "Europe" or "Global"
+  
+  // Their public presence
+  website: { type: String },
+  social_twitter: { type: String },
+  social_instagram: { type: String },
+  social_linkedin: { type: String },
+  social_youtube: { type: String },
+  follower_count: { type: Number, default: 0 },
+  
+  // Why FOFA / what they offer
+  why_fofa: { type: String, required: true },
+  what_they_offer: { type: String, required: true },
+  references: { type: String }, // "Recommended by John Smith at FA"
+  
+  // Verification
+  status: {
+    type: String,
+    enum: ["pending", "ai_reviewing", "needs_human_review", "approved", "rejected"],
+    default: "pending",
+    index: true,
+  },
+  
+  // AI verification result
+  ai_verification: {
+    decision: { type: String, enum: ["approved", "needs_review", "rejected", null], default: null },
+    confidence: { type: Number, min: 0, max: 1, default: null },
+    reasoning: { type: String, default: "" },
+    checks: {
+      identity_verified: { type: Boolean, default: null },
+      credentials_legitimate: { type: Boolean, default: null },
+      online_presence_verified: { type: Boolean, default: null },
+      red_flags: { type: [String], default: [] },
+    },
+    response_to_applicant: { type: String, default: "" },
+    verified_at: { type: Date, default: null },
+    raw_response: { type: String, default: "" },
+  },
+  
+  // Human review
+  human_decision: {
+    decided_by_email: { type: String, default: null },
+    decided_at: { type: Date, default: null },
+    decision: { type: String, enum: ["approved", "rejected", null], default: null },
+    notes: { type: String, default: "" },
+  },
+  
+  approved_expert_id: { type: mongoose.Schema.Types.ObjectId, ref: "Expert", default: null },
+  
+  submitted_at: { type: Date, default: Date.now, index: true },
+  updated_at: { type: Date, default: Date.now },
+});
+
+// ============================================================================
+// EXPERT SCHEMA (approved experts - public profiles)
+// ============================================================================
+
+const expertSchema = new mongoose.Schema({
+  application_id: { type: mongoose.Schema.Types.ObjectId, ref: "ExpertApplication", required: true, unique: true },
+  user_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null }, // If they have a fan account
+  
+  // Public profile
+  full_name: { type: String, required: true },
+  display_name: { type: String, required: true },
+  slug: { type: String, required: true, unique: true, lowercase: true, index: true },
+  
+  // Role
+  expert_type: {
+    type: String,
+    enum: ["verifier", "voice", "ambassador"],
+    required: true,
+    index: true,
+  },
+  tier: {
+    type: String,
+    enum: ["legend", "authority", "ambassador"],
+    default: "authority",
+  },
+  
+  // Background
+  professional_background: { type: String },
+  current_role: { type: String },
+  bio: { type: String },
+  country: { type: String },
+  region_focus: { type: String },
+  
+  // Affiliations
+  clubs_supported: { type: [String], default: [] },
+  affiliated_club_slugs: { type: [String], default: [] }, // For ambassadors
+  expertise_areas: { type: [String], default: [] },
+  
+  // Branding
+  profile_pic: { type: String, default: null },
+  cover_image: { type: String, default: null },
+  
+  // Online presence
+  website: { type: String },
+  social_twitter: { type: String },
+  social_instagram: { type: String },
+  social_linkedin: { type: String },
+  social_youtube: { type: String },
+  follower_count: { type: Number, default: 0 },
+  
+  // Activity stats
+  endorsement_count: { type: Number, default: 0, index: true },
+  fans_referred: { type: Number, default: 0 },
+  contribution_score: { type: Number, default: 0, index: true },
+  
+  // Status
+  status: {
+    type: String,
+    enum: ["active", "paused", "inactive"],
+    default: "active",
+    index: true,
+  },
+  is_featured: { type: Boolean, default: false, index: true },
+  
+  approved_at: { type: Date, default: Date.now },
+  updated_at: { type: Date, default: Date.now },
+});
+
+// ============================================================================
+// ENDORSEMENT SCHEMA (experts endorsing clubs)
+// ============================================================================
+
+const endorsementSchema = new mongoose.Schema({
+  expert_id: { type: mongoose.Schema.Types.ObjectId, ref: "Expert", required: true, index: true },
+  club_id: { type: mongoose.Schema.Types.ObjectId, ref: "Club", default: null },
+  club_application_id: { type: mongoose.Schema.Types.ObjectId, ref: "ClubApplication", default: null },
+  
+  endorsement_text: { type: String, required: true },
+  is_public: { type: Boolean, default: true },
+  
+  created_at: { type: Date, default: Date.now, index: true },
+});
+
 const User = mongoose.models.User || mongoose.model("User", userSchema);
 const Activity = mongoose.models.Activity || mongoose.model("Activity", activitySchema);
 const ClubApplication = mongoose.models.ClubApplication || mongoose.model("ClubApplication", clubApplicationSchema);
 const Club = mongoose.models.Club || mongoose.model("Club", clubSchema);
+const ExpertApplication = mongoose.models.ExpertApplication || mongoose.model("ExpertApplication", expertApplicationSchema);
+const Expert = mongoose.models.Expert || mongoose.model("Expert", expertSchema);
+const Endorsement = mongoose.models.Endorsement || mongoose.model("Endorsement", endorsementSchema);
 
 function calculateLevel(totalScore) {
   if (totalScore >= 5000) return "legend";
@@ -384,6 +553,105 @@ async function ensureUniqueClubSlug(name) {
   let slug = baseSlug;
   let i = 1;
   while (await Club.findOne({ slug })) {
+    slug = `${baseSlug}-${i++}`;
+  }
+  return slug;
+}
+
+// ============================================================================
+// EXPERT VERIFICATION (MOCK - replace with real Anthropic API later)
+// ============================================================================
+
+async function verifyExpertApplicationWithAI(application) {
+  const checks = {
+    identity_verified: null,
+    credentials_legitimate: null,
+    online_presence_verified: null,
+    red_flags: [],
+  };
+  
+  // Mock check 1: Online presence
+  const hasOnlinePresence = !!(application.website || application.social_twitter || application.social_linkedin);
+  if (hasOnlinePresence) {
+    checks.online_presence_verified = true;
+  } else {
+    checks.online_presence_verified = false;
+    checks.red_flags.push("no_online_presence");
+  }
+  
+  // Mock check 2: Credentials
+  const hasCredentials = application.professional_background && application.professional_background.length > 50;
+  if (hasCredentials) {
+    checks.credentials_legitimate = true;
+  } else {
+    checks.credentials_legitimate = false;
+    checks.red_flags.push("insufficient_credentials_provided");
+  }
+  
+  // Mock check 3: Email looks legit (not random)
+  const email = (application.email || "").toLowerCase();
+  if (email.match(/^(test|fake|spam|admin)\d*@/)) {
+    checks.identity_verified = false;
+    checks.red_flags.push("suspicious_email");
+  } else {
+    checks.identity_verified = true;
+  }
+  
+  // Mock check 4: Years in football (sanity)
+  if (application.years_in_football && application.years_in_football > 60) {
+    checks.red_flags.push("unrealistic_years_in_football");
+  }
+  
+  // Decision
+  let decision, confidence, reasoning, response_to_applicant;
+  
+  const passedChecks = [checks.identity_verified, checks.credentials_legitimate, checks.online_presence_verified].filter(c => c === true).length;
+  const failedChecks = [checks.identity_verified, checks.credentials_legitimate, checks.online_presence_verified].filter(c => c === false).length;
+  
+  if (failedChecks === 0 && passedChecks === 3 && checks.red_flags.length === 0) {
+    decision = "needs_review"; // Always have human review for experts
+    confidence = 0.8;
+    reasoning = `Application looks promising. ${application.professional_background.slice(0, 100)}... Recommend human review for final approval.`;
+    response_to_applicant = `Thank you for your application. Your background looks promising. Our team will review and be in touch within 5-7 business days.`;
+  } else if (failedChecks >= 2 || checks.red_flags.length >= 2) {
+    decision = "rejected";
+    confidence = 0.7;
+    reasoning = `Application has significant red flags: ${checks.red_flags.join(", ")}.`;
+    response_to_applicant = `Thank you for your interest. Unfortunately, we cannot proceed with your application at this time. Common reasons include insufficient verifiable credentials or limited online presence.`;
+  } else {
+    decision = "needs_review";
+    confidence = 0.55;
+    reasoning = `Application requires human review. ${checks.red_flags.length} red flags noted.`;
+    response_to_applicant = `Thank you for your application. We're reviewing your submission and will be in touch soon.`;
+  }
+  
+  return {
+    decision,
+    confidence,
+    reasoning,
+    checks,
+    response_to_applicant,
+    verified_at: new Date(),
+    raw_response: "MOCK_AI_RESPONSE - Replace with real Anthropic API call",
+  };
+}
+
+function slugifyName(name) {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 60);
+}
+
+async function ensureUniqueExpertSlug(name) {
+  let baseSlug = slugifyName(name);
+  if (!baseSlug) baseSlug = "expert";
+  let slug = baseSlug;
+  let i = 1;
+  while (await Expert.findOne({ slug })) {
     slug = `${baseSlug}-${i++}`;
   }
   return slug;
@@ -1132,6 +1400,492 @@ export default async function handler(req, res) {
       const { notes } = req.body || {};
       
       const application = await ClubApplication.findById(id);
+      if (!application) return res.status(404).json({ error: "Application not found" });
+      
+      application.status = "rejected";
+      application.human_decision = {
+        decided_by_email: decoded.email,
+        decided_at: new Date(),
+        decision: "rejected",
+        notes: notes || "",
+      };
+      application.updated_at = new Date();
+      await application.save();
+      
+      return res.status(200).json({ message: "Application rejected" });
+    }
+
+    // ============ EXPERT ENDPOINTS ============
+    
+    // Submit expert application
+    if (pathname.endsWith("/experts/apply") && req.method === "POST") {
+      const decoded = verifyToken(req);
+      const data = req.body || {};
+      
+      // Validate required fields
+      const required = ["full_name", "display_name", "email", "country", "expert_type", "professional_background", "why_fofa", "what_they_offer"];
+      const missing = required.filter(f => !data[f]);
+      if (missing.length) {
+        return res.status(400).json({ error: `Missing required fields: ${missing.join(", ")}` });
+      }
+      
+      // Validate email
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) {
+        return res.status(400).json({ error: "Invalid email format" });
+      }
+      
+      // Check for duplicate
+      const recent = await ExpertApplication.findOne({
+        email: data.email.toLowerCase(),
+        submitted_at: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      });
+      if (recent) {
+        return res.status(409).json({
+          error: "We already received an application from this email in the last 24 hours.",
+          existing_status: recent.status,
+        });
+      }
+      
+      // Create application
+      const application = await ExpertApplication.create({
+        submitted_by: decoded ? decoded.userId : null,
+        full_name: data.full_name.trim(),
+        display_name: data.display_name.trim(),
+        email: data.email.toLowerCase().trim(),
+        phone: data.phone || "",
+        country: data.country.trim(),
+        expert_type: data.expert_type,
+        professional_background: data.professional_background.trim(),
+        current_role: data.current_role || "",
+        years_in_football: data.years_in_football ? parseInt(data.years_in_football) : null,
+        clubs_supported: Array.isArray(data.clubs_supported) ? data.clubs_supported : (data.clubs_supported ? data.clubs_supported.split(",").map(s => s.trim()) : []),
+        expertise_areas: Array.isArray(data.expertise_areas) ? data.expertise_areas : (data.expertise_areas ? data.expertise_areas.split(",").map(s => s.trim()) : []),
+        region_focus: data.region_focus || "",
+        website: data.website || "",
+        social_twitter: data.social_twitter || "",
+        social_instagram: data.social_instagram || "",
+        social_linkedin: data.social_linkedin || "",
+        social_youtube: data.social_youtube || "",
+        follower_count: data.follower_count ? parseInt(data.follower_count) : 0,
+        why_fofa: data.why_fofa.trim(),
+        what_they_offer: data.what_they_offer.trim(),
+        references: data.references || "",
+        status: "ai_reviewing",
+      });
+      
+      // Run AI verification
+      try {
+        const aiResult = await verifyExpertApplicationWithAI(application);
+        application.ai_verification = aiResult;
+        application.status = aiResult.decision === "rejected" ? "rejected" : "needs_human_review";
+        await application.save();
+      } catch (err) {
+        console.error("Expert AI verification error:", err);
+        application.status = "needs_human_review";
+        await application.save();
+      }
+      
+      return res.status(201).json({
+        message: "Application submitted successfully",
+        application_id: application._id.toString(),
+        status: application.status,
+        ai_decision: application.ai_verification.decision,
+        ai_response: application.ai_verification.response_to_applicant,
+      });
+    }
+    
+    // List public approved experts
+    if (pathname.endsWith("/experts") && req.method === "GET" && !pathname.includes("/admin/")) {
+      const queryString = url.includes("?") ? url.split("?")[1] : "";
+      const params = new URLSearchParams(queryString);
+      const limit = Math.min(parseInt(params.get("limit") || "100"), 200);
+      const expert_type = params.get("type");
+      const featured_only = params.get("featured") === "true";
+      
+      const query = { status: "active" };
+      if (expert_type) query.expert_type = expert_type;
+      if (featured_only) query.is_featured = true;
+      
+      const experts = await Expert.find(query)
+        .sort({ is_featured: -1, contribution_score: -1, endorsement_count: -1 })
+        .limit(limit)
+        .select("full_name display_name slug expert_type tier current_role bio country profile_pic clubs_supported expertise_areas endorsement_count fans_referred is_featured");
+      
+      return res.status(200).json({
+        experts: experts.map(e => ({
+          id: e._id.toString(),
+          full_name: e.full_name,
+          display_name: e.display_name,
+          slug: e.slug,
+          expert_type: e.expert_type,
+          tier: e.tier,
+          current_role: e.current_role,
+          bio: e.bio?.slice(0, 150) || "",
+          country: e.country,
+          profile_pic: e.profile_pic,
+          clubs_supported: e.clubs_supported,
+          expertise_areas: e.expertise_areas,
+          endorsement_count: e.endorsement_count,
+          fans_referred: e.fans_referred,
+          is_featured: e.is_featured,
+        })),
+        meta: { total: experts.length },
+      });
+    }
+    
+    // Get individual expert profile (by slug) - exclude admin paths
+    if (pathname.match(/\/experts\/[a-z0-9-]+$/) && req.method === "GET" && !pathname.includes("/admin/") && !pathname.endsWith("/apply")) {
+      const slug = pathname.split("/").pop();
+      
+      const expert = await Expert.findOne({ slug, status: "active" });
+      if (!expert) {
+        return res.status(404).json({ error: "Expert not found" });
+      }
+      
+      // Get their endorsements
+      const endorsements = await Endorsement.find({
+        expert_id: expert._id,
+        is_public: true,
+        club_id: { $ne: null },
+      })
+        .populate("club_id", "name slug logo_url")
+        .sort({ created_at: -1 })
+        .limit(20);
+      
+      return res.status(200).json({
+        expert: {
+          id: expert._id.toString(),
+          full_name: expert.full_name,
+          display_name: expert.display_name,
+          slug: expert.slug,
+          expert_type: expert.expert_type,
+          tier: expert.tier,
+          professional_background: expert.professional_background,
+          current_role: expert.current_role,
+          bio: expert.bio,
+          country: expert.country,
+          region_focus: expert.region_focus,
+          clubs_supported: expert.clubs_supported,
+          affiliated_club_slugs: expert.affiliated_club_slugs,
+          expertise_areas: expert.expertise_areas,
+          profile_pic: expert.profile_pic,
+          cover_image: expert.cover_image,
+          website: expert.website,
+          social: {
+            twitter: expert.social_twitter,
+            instagram: expert.social_instagram,
+            linkedin: expert.social_linkedin,
+            youtube: expert.social_youtube,
+          },
+          follower_count: expert.follower_count,
+          endorsement_count: expert.endorsement_count,
+          fans_referred: expert.fans_referred,
+          is_featured: expert.is_featured,
+          approved_at: expert.approved_at,
+        },
+        endorsements: endorsements.map(e => ({
+          id: e._id.toString(),
+          club: e.club_id ? {
+            id: e.club_id._id.toString(),
+            name: e.club_id.name,
+            slug: e.club_id.slug,
+            logo_url: e.club_id.logo_url,
+          } : null,
+          endorsement_text: e.endorsement_text,
+          created_at: e.created_at,
+        })),
+      });
+    }
+    
+    // Get current user's expert profile (if they are one)
+    if (pathname.endsWith("/experts/me") && req.method === "GET") {
+      const decoded = verifyToken(req);
+      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
+      
+      const user = await User.findById(decoded.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      
+      const expert = await Expert.findOne({
+        $or: [
+          { user_id: decoded.userId },
+          // Match by email through application
+        ],
+        status: "active",
+      });
+      
+      if (!expert) {
+        // Try matching by email via application
+        const application = await ExpertApplication.findOne({
+          email: user.email.toLowerCase(),
+          status: "approved",
+        });
+        if (application && application.approved_expert_id) {
+          const expertViaApp = await Expert.findById(application.approved_expert_id);
+          if (expertViaApp) {
+            return res.status(200).json({
+              is_expert: true,
+              expert: {
+                id: expertViaApp._id.toString(),
+                slug: expertViaApp.slug,
+                full_name: expertViaApp.full_name,
+                expert_type: expertViaApp.expert_type,
+                tier: expertViaApp.tier,
+                endorsement_count: expertViaApp.endorsement_count,
+              },
+            });
+          }
+        }
+        return res.status(200).json({ is_expert: false });
+      }
+      
+      return res.status(200).json({
+        is_expert: true,
+        expert: {
+          id: expert._id.toString(),
+          slug: expert.slug,
+          full_name: expert.full_name,
+          expert_type: expert.expert_type,
+          tier: expert.tier,
+          endorsement_count: expert.endorsement_count,
+        },
+      });
+    }
+    
+    // Submit endorsement (expert endorses a club)
+    if (pathname.endsWith("/experts/endorse") && req.method === "POST") {
+      const decoded = verifyToken(req);
+      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
+      
+      const user = await User.findById(decoded.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      
+      // Find the user's expert profile
+      const application = await ExpertApplication.findOne({
+        email: user.email.toLowerCase(),
+        status: "approved",
+      });
+      if (!application || !application.approved_expert_id) {
+        return res.status(403).json({ error: "Expert access required" });
+      }
+      const expert = await Expert.findById(application.approved_expert_id);
+      if (!expert || expert.status !== "active") {
+        return res.status(403).json({ error: "Active expert profile required" });
+      }
+      
+      const { club_id, club_application_id, endorsement_text } = req.body || {};
+      if (!endorsement_text || endorsement_text.length < 20) {
+        return res.status(400).json({ error: "Endorsement text required (minimum 20 chars)" });
+      }
+      if (!club_id && !club_application_id) {
+        return res.status(400).json({ error: "Either club_id or club_application_id required" });
+      }
+      
+      // Check no duplicate endorsement
+      const existing = await Endorsement.findOne({
+        expert_id: expert._id,
+        ...(club_id ? { club_id } : { club_application_id }),
+      });
+      if (existing) {
+        return res.status(409).json({ error: "You've already endorsed this club" });
+      }
+      
+      const endorsement = await Endorsement.create({
+        expert_id: expert._id,
+        club_id: club_id || null,
+        club_application_id: club_application_id || null,
+        endorsement_text: endorsement_text.trim(),
+        is_public: true,
+      });
+      
+      // Increment expert's endorsement count
+      expert.endorsement_count += 1;
+      expert.contribution_score += 100;
+      await expert.save();
+      
+      return res.status(201).json({
+        message: "Endorsement submitted",
+        endorsement: {
+          id: endorsement._id.toString(),
+          created_at: endorsement.created_at,
+        },
+      });
+    }
+    
+    // Get endorsements for a club
+    if (pathname.match(/\/clubs\/[a-z0-9-]+\/endorsements$/) && req.method === "GET") {
+      const slug = pathname.split("/")[pathname.split("/").length - 2];
+      
+      const club = await Club.findOne({ slug, status: "active" });
+      if (!club) {
+        return res.status(404).json({ error: "Club not found" });
+      }
+      
+      const endorsements = await Endorsement.find({
+        club_id: club._id,
+        is_public: true,
+      })
+        .populate("expert_id", "full_name display_name slug expert_type tier profile_pic current_role")
+        .sort({ created_at: -1 });
+      
+      return res.status(200).json({
+        endorsements: endorsements.map(e => ({
+          id: e._id.toString(),
+          expert: e.expert_id ? {
+            id: e.expert_id._id.toString(),
+            full_name: e.expert_id.full_name,
+            display_name: e.expert_id.display_name,
+            slug: e.expert_id.slug,
+            expert_type: e.expert_id.expert_type,
+            tier: e.expert_id.tier,
+            profile_pic: e.expert_id.profile_pic,
+            current_role: e.expert_id.current_role,
+          } : null,
+          endorsement_text: e.endorsement_text,
+          created_at: e.created_at,
+        })),
+      });
+    }
+    
+    // ============ ADMIN: EXPERT MANAGEMENT ============
+    
+    // List expert applications (admin only)
+    if (pathname.endsWith("/admin/experts/applications") && req.method === "GET") {
+      const decoded = verifyToken(req);
+      const ADMIN_EMAILS_LIST = (process.env.ADMIN_EMAILS || "").split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
+      if (!decoded || !ADMIN_EMAILS_LIST.includes((decoded.email || "").toLowerCase())) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      const queryString = url.includes("?") ? url.split("?")[1] : "";
+      const params = new URLSearchParams(queryString);
+      const status = params.get("status");
+      
+      const query = status ? { status } : {};
+      const applications = await ExpertApplication.find(query)
+        .sort({ submitted_at: -1 })
+        .limit(100);
+      
+      return res.status(200).json({
+        applications: applications.map(a => ({
+          id: a._id.toString(),
+          full_name: a.full_name,
+          display_name: a.display_name,
+          email: a.email,
+          country: a.country,
+          expert_type: a.expert_type,
+          current_role: a.current_role,
+          professional_background: a.professional_background.slice(0, 150),
+          status: a.status,
+          ai_decision: a.ai_verification?.decision || null,
+          ai_confidence: a.ai_verification?.confidence || null,
+          submitted_at: a.submitted_at,
+        })),
+        counts: {
+          pending: await ExpertApplication.countDocuments({ status: "pending" }),
+          ai_reviewing: await ExpertApplication.countDocuments({ status: "ai_reviewing" }),
+          needs_human_review: await ExpertApplication.countDocuments({ status: "needs_human_review" }),
+          approved: await ExpertApplication.countDocuments({ status: "approved" }),
+          rejected: await ExpertApplication.countDocuments({ status: "rejected" }),
+        },
+      });
+    }
+    
+    // Get expert application details (admin only)
+    if (pathname.match(/\/admin\/experts\/applications\/[^\/]+$/) && req.method === "GET") {
+      const decoded = verifyToken(req);
+      const ADMIN_EMAILS_LIST = (process.env.ADMIN_EMAILS || "").split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
+      if (!decoded || !ADMIN_EMAILS_LIST.includes((decoded.email || "").toLowerCase())) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      const id = pathname.split("/").pop();
+      const application = await ExpertApplication.findById(id);
+      if (!application) {
+        return res.status(404).json({ error: "Application not found" });
+      }
+      
+      return res.status(200).json({ application });
+    }
+    
+    // Approve expert application
+    if (pathname.match(/\/admin\/experts\/applications\/[^\/]+\/approve$/) && req.method === "POST") {
+      const decoded = verifyToken(req);
+      const ADMIN_EMAILS_LIST = (process.env.ADMIN_EMAILS || "").split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
+      if (!decoded || !ADMIN_EMAILS_LIST.includes((decoded.email || "").toLowerCase())) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      const parts = pathname.split("/");
+      const id = parts[parts.length - 2];
+      const { notes, tier, is_featured } = req.body || {};
+      
+      const application = await ExpertApplication.findById(id);
+      if (!application) return res.status(404).json({ error: "Application not found" });
+      if (application.status === "approved") return res.status(400).json({ error: "Already approved" });
+      
+      // Try to link to existing user account by email
+      const matchingUser = await User.findOne({ email: application.email.toLowerCase() });
+      
+      // Create the public Expert
+      const slug = await ensureUniqueExpertSlug(application.full_name);
+      const expert = await Expert.create({
+        application_id: application._id,
+        user_id: matchingUser ? matchingUser._id : null,
+        full_name: application.full_name,
+        display_name: application.display_name,
+        slug,
+        expert_type: application.expert_type,
+        tier: tier || "authority",
+        professional_background: application.professional_background,
+        current_role: application.current_role,
+        bio: application.what_they_offer,
+        country: application.country,
+        region_focus: application.region_focus,
+        clubs_supported: application.clubs_supported,
+        expertise_areas: application.expertise_areas,
+        website: application.website,
+        social_twitter: application.social_twitter,
+        social_instagram: application.social_instagram,
+        social_linkedin: application.social_linkedin,
+        social_youtube: application.social_youtube,
+        follower_count: application.follower_count,
+        is_featured: is_featured || false,
+      });
+      
+      application.status = "approved";
+      application.approved_expert_id = expert._id;
+      application.human_decision = {
+        decided_by_email: decoded.email,
+        decided_at: new Date(),
+        decision: "approved",
+        notes: notes || "",
+      };
+      application.updated_at = new Date();
+      await application.save();
+      
+      return res.status(200).json({
+        message: "Expert approved",
+        expert: {
+          id: expert._id.toString(),
+          slug: expert.slug,
+          public_url: `/#experts/${expert.slug}`,
+        },
+      });
+    }
+    
+    // Reject expert application
+    if (pathname.match(/\/admin\/experts\/applications\/[^\/]+\/reject$/) && req.method === "POST") {
+      const decoded = verifyToken(req);
+      const ADMIN_EMAILS_LIST = (process.env.ADMIN_EMAILS || "").split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
+      if (!decoded || !ADMIN_EMAILS_LIST.includes((decoded.email || "").toLowerCase())) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      
+      const parts = pathname.split("/");
+      const id = parts[parts.length - 2];
+      const { notes } = req.body || {};
+      
+      const application = await ExpertApplication.findById(id);
       if (!application) return res.status(404).json({ error: "Application not found" });
       
       application.status = "rejected";

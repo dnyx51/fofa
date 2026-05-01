@@ -1628,9 +1628,25 @@ export default async function handler(req, res) {
                 id: expertViaApp._id.toString(),
                 slug: expertViaApp.slug,
                 full_name: expertViaApp.full_name,
+                display_name: expertViaApp.display_name,
                 expert_type: expertViaApp.expert_type,
                 tier: expertViaApp.tier,
+                bio: expertViaApp.bio,
+                current_role: expertViaApp.current_role,
+                country: expertViaApp.country,
+                region_focus: expertViaApp.region_focus,
+                website: expertViaApp.website,
+                social: {
+                  twitter: expertViaApp.social_twitter,
+                  instagram: expertViaApp.social_instagram,
+                  linkedin: expertViaApp.social_linkedin,
+                  youtube: expertViaApp.social_youtube,
+                },
+                clubs_supported: expertViaApp.clubs_supported,
+                expertise_areas: expertViaApp.expertise_areas,
+                profile_pic: expertViaApp.profile_pic,
                 endorsement_count: expertViaApp.endorsement_count,
+                is_featured: expertViaApp.is_featured,
               },
             });
           }
@@ -1644,13 +1660,203 @@ export default async function handler(req, res) {
           id: expert._id.toString(),
           slug: expert.slug,
           full_name: expert.full_name,
+          display_name: expert.display_name,
+          expert_type: expert.expert_type,
+          tier: expert.tier,
+          bio: expert.bio,
+          current_role: expert.current_role,
+          country: expert.country,
+          region_focus: expert.region_focus,
+          website: expert.website,
+          social: {
+            twitter: expert.social_twitter,
+            instagram: expert.social_instagram,
+            linkedin: expert.social_linkedin,
+            youtube: expert.social_youtube,
+          },
+          clubs_supported: expert.clubs_supported,
+          expertise_areas: expert.expertise_areas,
+          profile_pic: expert.profile_pic,
+          endorsement_count: expert.endorsement_count,
+          is_featured: expert.is_featured,
+        },
+      });
+    }
+
+    // ========================================================================
+    // UPDATE EXPERT PROFILE (expert edits own profile)
+    // ========================================================================
+    if (pathname.endsWith("/experts/me") && req.method === "PATCH") {
+      const decoded = verifyToken(req);
+      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
+
+      const user = await User.findById(decoded.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      // Find expert profile via application email match
+      let expert = await Expert.findOne({ user_id: decoded.userId, status: "active" });
+      if (!expert) {
+        const application = await ExpertApplication.findOne({
+          email: user.email.toLowerCase(),
+          status: "approved",
+        });
+        if (application && application.approved_expert_id) {
+          expert = await Expert.findById(application.approved_expert_id);
+        }
+      }
+      if (!expert || expert.status !== "active") {
+        return res.status(403).json({ error: "Active expert profile required" });
+      }
+
+      const data = req.body || {};
+      const allowedFields = [
+        "display_name", "bio", "current_role", "country", "region_focus",
+        "website", "social_twitter", "social_instagram", "social_linkedin",
+        "social_youtube", "clubs_supported", "expertise_areas", "profile_pic",
+      ];
+
+      let updated = false;
+      for (const field of allowedFields) {
+        if (data[field] !== undefined) {
+          if (field === "clubs_supported" || field === "expertise_areas") {
+            expert[field] = Array.isArray(data[field])
+              ? data[field].map(s => String(s).trim()).filter(Boolean)
+              : String(data[field]).split(",").map(s => s.trim()).filter(Boolean);
+          } else {
+            expert[field] = String(data[field]).trim();
+          }
+          updated = true;
+        }
+      }
+
+      if (!updated) {
+        return res.status(400).json({ error: "No valid fields to update" });
+      }
+
+      expert.updated_at = new Date();
+      await expert.save();
+
+      return res.status(200).json({
+        message: "Profile updated",
+        expert: {
+          id: expert._id.toString(),
+          slug: expert.slug,
+          full_name: expert.full_name,
+          display_name: expert.display_name,
+          bio: expert.bio,
+          current_role: expert.current_role,
+          country: expert.country,
+          region_focus: expert.region_focus,
+          website: expert.website,
+          social: {
+            twitter: expert.social_twitter,
+            instagram: expert.social_instagram,
+            linkedin: expert.social_linkedin,
+            youtube: expert.social_youtube,
+          },
+          clubs_supported: expert.clubs_supported,
+          expertise_areas: expert.expertise_areas,
+          profile_pic: expert.profile_pic,
           expert_type: expert.expert_type,
           tier: expert.tier,
           endorsement_count: expert.endorsement_count,
         },
       });
     }
-    
+
+    // ========================================================================
+    // EDIT ENDORSEMENT (expert edits own endorsement)
+    // ========================================================================
+    if (pathname.match(/\/experts\/endorsements\/[^\/]+$/) && req.method === "PATCH") {
+      const decoded = verifyToken(req);
+      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
+
+      const user = await User.findById(decoded.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      // Find expert
+      let expert = await Expert.findOne({ user_id: decoded.userId, status: "active" });
+      if (!expert) {
+        const application = await ExpertApplication.findOne({
+          email: user.email.toLowerCase(),
+          status: "approved",
+        });
+        if (application && application.approved_expert_id) {
+          expert = await Expert.findById(application.approved_expert_id);
+        }
+      }
+      if (!expert) return res.status(403).json({ error: "Expert access required" });
+
+      const endorsementId = pathname.split("/").pop();
+      const endorsement = await Endorsement.findById(endorsementId);
+      if (!endorsement) return res.status(404).json({ error: "Endorsement not found" });
+
+      // Verify ownership
+      if (endorsement.expert_id.toString() !== expert._id.toString()) {
+        return res.status(403).json({ error: "You can only edit your own endorsements" });
+      }
+
+      const { endorsement_text } = req.body || {};
+      if (!endorsement_text || endorsement_text.trim().length < 20) {
+        return res.status(400).json({ error: "Endorsement text required (minimum 20 chars)" });
+      }
+
+      endorsement.endorsement_text = endorsement_text.trim();
+      await endorsement.save();
+
+      return res.status(200).json({
+        message: "Endorsement updated",
+        endorsement: {
+          id: endorsement._id.toString(),
+          endorsement_text: endorsement.endorsement_text,
+        },
+      });
+    }
+
+    // ========================================================================
+    // DELETE ENDORSEMENT (expert deletes own endorsement)
+    // ========================================================================
+    if (pathname.match(/\/experts\/endorsements\/[^\/]+$/) && req.method === "DELETE") {
+      const decoded = verifyToken(req);
+      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
+
+      const user = await User.findById(decoded.userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      // Find expert
+      let expert = await Expert.findOne({ user_id: decoded.userId, status: "active" });
+      if (!expert) {
+        const application = await ExpertApplication.findOne({
+          email: user.email.toLowerCase(),
+          status: "approved",
+        });
+        if (application && application.approved_expert_id) {
+          expert = await Expert.findById(application.approved_expert_id);
+        }
+      }
+      if (!expert) return res.status(403).json({ error: "Expert access required" });
+
+      const endorsementId = pathname.split("/").pop();
+      const endorsement = await Endorsement.findById(endorsementId);
+      if (!endorsement) return res.status(404).json({ error: "Endorsement not found" });
+
+      // Verify ownership
+      if (endorsement.expert_id.toString() !== expert._id.toString()) {
+        return res.status(403).json({ error: "You can only delete your own endorsements" });
+      }
+
+      await Endorsement.findByIdAndDelete(endorsementId);
+
+      // Decrement endorsement count
+      if (expert.endorsement_count > 0) {
+        expert.endorsement_count -= 1;
+        expert.contribution_score = Math.max(0, expert.contribution_score - 100);
+        await expert.save();
+      }
+
+      return res.status(200).json({ message: "Endorsement deleted" });
+    }
+
     // Submit endorsement (expert endorses a club)
     if (pathname.endsWith("/experts/endorse") && req.method === "POST") {
       const decoded = verifyToken(req);

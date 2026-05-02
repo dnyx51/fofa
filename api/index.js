@@ -51,6 +51,19 @@ const userSchema = new mongoose.Schema({
   community_score: { type: Number, default: 0 },
   growth_score: { type: Number, default: 0 },
   level: { type: String, default: "apprentice" },
+  // Club following
+  following_clubs: { type: [mongoose.Schema.Types.ObjectId], ref: "Club", default: [], index: true },
+  // Achievement badges
+  badges: {
+    type: [{
+      badge_id: String,
+      name: String,
+      description: String,
+      icon: String,
+      earned_at: { type: Date, default: Date.now },
+    }],
+    default: [],
+  },
   // Referral system
   referral_code: { type: String, unique: true, sparse: true, index: true },
   referred_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
@@ -430,6 +443,130 @@ const reportSchema = new mongoose.Schema({
 });
 
 const Report = mongoose.models.Report || mongoose.model("Report", reportSchema);
+
+// ============================================================================
+// BADGE DEFINITIONS & HELPERS
+// ============================================================================
+
+const BADGE_DEFINITIONS = [
+  { badge_id: "first_activity", name: "First Steps", description: "Logged your first activity", icon: "🌱", category: "activity" },
+  { badge_id: "five_activities", name: "Getting Started", description: "Logged 5 activities", icon: "🔥", category: "activity" },
+  { badge_id: "twenty_activities", name: "Dedicated Fan", description: "Logged 20 activities", icon: "💪", category: "activity" },
+  { badge_id: "fifty_activities", name: "Die-Hard", description: "Logged 50 activities", icon: "🏆", category: "activity" },
+  { badge_id: "first_follow", name: "First Follow", description: "Followed your first club", icon: "⚽", category: "clubs" },
+  { badge_id: "three_follows", name: "Club Explorer", description: "Following 3 clubs", icon: "🧭", category: "clubs" },
+  { badge_id: "ten_follows", name: "Scout", description: "Following 10 clubs", icon: "🌍", category: "clubs" },
+  { badge_id: "first_referral", name: "Recruiter", description: "Referred your first fan", icon: "🤝", category: "community" },
+  { badge_id: "five_referrals", name: "Ambassador", description: "Referred 5 fans", icon: "📢", category: "community" },
+  { badge_id: "supporter_level", name: "Supporter", description: "Reached Supporter level (100 pts)", icon: "⭐", category: "level" },
+  { badge_id: "devotee_level", name: "Devotee", description: "Reached Devotee level (500 pts)", icon: "🌟", category: "level" },
+  { badge_id: "veteran_level", name: "Veteran", description: "Reached Veteran level (1500 pts)", icon: "🎖️", category: "level" },
+  { badge_id: "legend_level", name: "Legend", description: "Reached Legend level (5000 pts)", icon: "👑", category: "level" },
+  { badge_id: "match_day", name: "Match Day", description: "Attended your first match", icon: "🏟️", category: "activity" },
+  { badge_id: "merch_buyer", name: "True Colours", description: "Bought club merchandise", icon: "👕", category: "activity" },
+  { badge_id: "social_sharer", name: "Megaphone", description: "Shared on social media", icon: "📱", category: "activity" },
+  { badge_id: "volunteer", name: "Community Hero", description: "Volunteered for a club", icon: "💚", category: "activity" },
+];
+
+async function computeEarnedBadges(userId) {
+  const user = await User.findById(userId);
+  if (!user) return [];
+
+  const existing = (user.badges || []).map(b => b.badge_id);
+  const newBadges = [];
+
+  // Activity count badges
+  const activityCount = await Activity.countDocuments({ user_id: userId });
+  if (activityCount >= 1 && !existing.includes("first_activity")) {
+    newBadges.push(makeBadge("first_activity"));
+  }
+  if (activityCount >= 5 && !existing.includes("five_activities")) {
+    newBadges.push(makeBadge("five_activities"));
+  }
+  if (activityCount >= 20 && !existing.includes("twenty_activities")) {
+    newBadges.push(makeBadge("twenty_activities"));
+  }
+  if (activityCount >= 50 && !existing.includes("fifty_activities")) {
+    newBadges.push(makeBadge("fifty_activities"));
+  }
+
+  // Club following badges
+  const followCount = (user.following_clubs || []).length;
+  if (followCount >= 1 && !existing.includes("first_follow")) {
+    newBadges.push(makeBadge("first_follow"));
+  }
+  if (followCount >= 3 && !existing.includes("three_follows")) {
+    newBadges.push(makeBadge("three_follows"));
+  }
+  if (followCount >= 10 && !existing.includes("ten_follows")) {
+    newBadges.push(makeBadge("ten_follows"));
+  }
+
+  // Referral badges
+  const referralCount = await User.countDocuments({ referred_by: userId });
+  if (referralCount >= 1 && !existing.includes("first_referral")) {
+    newBadges.push(makeBadge("first_referral"));
+  }
+  if (referralCount >= 5 && !existing.includes("five_referrals")) {
+    newBadges.push(makeBadge("five_referrals"));
+  }
+
+  // Level badges
+  const score = user.total_score || 0;
+  if (score >= 100 && !existing.includes("supporter_level")) {
+    newBadges.push(makeBadge("supporter_level"));
+  }
+  if (score >= 500 && !existing.includes("devotee_level")) {
+    newBadges.push(makeBadge("devotee_level"));
+  }
+  if (score >= 1500 && !existing.includes("veteran_level")) {
+    newBadges.push(makeBadge("veteran_level"));
+  }
+  if (score >= 5000 && !existing.includes("legend_level")) {
+    newBadges.push(makeBadge("legend_level"));
+  }
+
+  // Activity type badges
+  const hasMatch = await Activity.findOne({ user_id: userId, activity_type: "match_attendance" });
+  if (hasMatch && !existing.includes("match_day")) {
+    newBadges.push(makeBadge("match_day"));
+  }
+  const hasMerch = await Activity.findOne({ user_id: userId, activity_type: "merch_purchase" });
+  if (hasMerch && !existing.includes("merch_buyer")) {
+    newBadges.push(makeBadge("merch_buyer"));
+  }
+  const hasSocial = await Activity.findOne({ user_id: userId, activity_type: "social_engagement" });
+  if (hasSocial && !existing.includes("social_sharer")) {
+    newBadges.push(makeBadge("social_sharer"));
+  }
+  const hasVolunteer = await Activity.findOne({ user_id: userId, activity_type: "volunteering" });
+  if (hasVolunteer && !existing.includes("volunteer")) {
+    newBadges.push(makeBadge("volunteer"));
+  }
+
+  return newBadges;
+}
+
+function makeBadge(badgeId) {
+  const def = BADGE_DEFINITIONS.find(b => b.badge_id === badgeId);
+  if (!def) return null;
+  return {
+    badge_id: def.badge_id,
+    name: def.name,
+    description: def.description,
+    icon: def.icon,
+    earned_at: new Date(),
+  };
+}
+
+async function checkAndAwardBadge(user, badgeId, name, description, icon) {
+  const existing = (user.badges || []).find(b => b.badge_id === badgeId);
+  if (existing) return false;
+  user.badges = user.badges || [];
+  user.badges.push({ badge_id: badgeId, name, description, icon, earned_at: new Date() });
+  await user.save();
+  return true;
+}
 
 function calculateLevel(totalScore) {
   if (totalScore >= 5000) return "legend";
@@ -2744,6 +2881,302 @@ export default async function handler(req, res) {
       await report.save();
 
       return res.status(200).json({ message: `Report ${newStatus}` });
+    }
+
+    // ========================================================================
+    // CLUB FOLLOWING ENDPOINTS
+    // ========================================================================
+
+    // POST /clubs/:slug/follow — follow a club
+    if (pathname.match(/\/clubs\/[^\/]+\/follow$/) && req.method === "POST") {
+      const decoded = verifyToken(req);
+      const slug = pathname.split("/").slice(-2, -1)[0];
+      const club = await Club.findOne({ slug, status: "active" });
+      if (!club) return res.status(404).json({ error: "Club not found" });
+
+      const user = await User.findById(decoded.id);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      if (user.following_clubs.includes(club._id)) {
+        return res.status(400).json({ error: "Already following this club" });
+      }
+
+      user.following_clubs.push(club._id);
+      user.updated_at = new Date();
+      await user.save();
+
+      // Increment club fan_count
+      club.fan_count = (club.fan_count || 0) + 1;
+      await club.save();
+
+      // Award badge: first club followed
+      await checkAndAwardBadge(user, "first_follow", "First Follow", "Followed your first club", "⚽");
+
+      return res.status(200).json({
+        message: `Now following ${club.name}`,
+        following_count: user.following_clubs.length,
+        club_fan_count: club.fan_count,
+      });
+    }
+
+    // DELETE /clubs/:slug/follow — unfollow a club
+    if (pathname.match(/\/clubs\/[^\/]+\/follow$/) && req.method === "DELETE") {
+      const decoded = verifyToken(req);
+      const slug = pathname.split("/").slice(-2, -1)[0];
+      const club = await Club.findOne({ slug, status: "active" });
+      if (!club) return res.status(404).json({ error: "Club not found" });
+
+      const user = await User.findById(decoded.id);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const idx = user.following_clubs.indexOf(club._id);
+      if (idx === -1) {
+        return res.status(400).json({ error: "Not following this club" });
+      }
+
+      user.following_clubs.splice(idx, 1);
+      user.updated_at = new Date();
+      await user.save();
+
+      club.fan_count = Math.max(0, (club.fan_count || 1) - 1);
+      await club.save();
+
+      return res.status(200).json({
+        message: `Unfollowed ${club.name}`,
+        following_count: user.following_clubs.length,
+        club_fan_count: club.fan_count,
+      });
+    }
+
+    // GET /user/following — get clubs the user follows
+    if (pathname === "/api/user/following" && req.method === "GET") {
+      const decoded = verifyToken(req);
+      const user = await User.findById(decoded.id);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const clubs = await Club.find({
+        _id: { $in: user.following_clubs },
+        status: "active",
+      }).select("name slug country league stadium fan_count logo_url");
+
+      return res.status(200).json({ clubs });
+    }
+
+    // ========================================================================
+    // ACTIVITY FEED ENDPOINT
+    // ========================================================================
+
+    // GET /feed — aggregated platform activity feed
+    if (pathname === "/api/feed" && req.method === "GET") {
+      const limit = Math.min(parseInt(req.query?.limit) || 30, 50);
+      const before = req.query?.before;
+      const feedItems = [];
+
+      // Fetch recent activities (fan loyalty actions)
+      const activityQuery = {};
+      if (before) activityQuery.created_at = { $lt: new Date(before) };
+      const recentActivities = await Activity.find(activityQuery)
+        .sort({ created_at: -1 })
+        .limit(limit)
+        .populate("user_id", "display_name username");
+
+      recentActivities.forEach(a => {
+        if (a.user_id) {
+          feedItems.push({
+            type: "activity",
+            icon: "⚡",
+            title: `${a.user_id.display_name} logged an activity`,
+            subtitle: a.description || a.activity_type,
+            points: a.points,
+            timestamp: a.created_at,
+            user: { display_name: a.user_id.display_name, username: a.user_id.username },
+          });
+        }
+      });
+
+      // Fetch recent endorsements
+      const endorseQuery = {};
+      if (before) endorseQuery.created_at = { $lt: new Date(before) };
+      const recentEndorsements = await Endorsement.find(endorseQuery)
+        .sort({ created_at: -1 })
+        .limit(limit)
+        .populate("expert_id", "name slug")
+        .populate("club_id", "name slug");
+
+      recentEndorsements.forEach(e => {
+        if (e.expert_id && e.club_id) {
+          feedItems.push({
+            type: "endorsement",
+            icon: "🛡️",
+            title: `${e.expert_id.name} endorsed ${e.club_id.name}`,
+            subtitle: e.content.length > 100 ? e.content.slice(0, 100) + "…" : e.content,
+            timestamp: e.created_at,
+            expert: { name: e.expert_id.name, slug: e.expert_id.slug },
+            club: { name: e.club_id.name, slug: e.club_id.slug },
+          });
+        }
+      });
+
+      // Fetch recent published articles
+      const articleQuery = { status: "published" };
+      if (before) articleQuery.published_at = { $lt: new Date(before) };
+      const recentArticles = await Article.find(articleQuery)
+        .sort({ published_at: -1 })
+        .limit(limit)
+        .populate("expert_id", "name slug");
+
+      recentArticles.forEach(a => {
+        if (a.expert_id) {
+          feedItems.push({
+            type: "article",
+            icon: "📝",
+            title: a.title,
+            subtitle: a.summary || "",
+            timestamp: a.published_at || a.created_at,
+            expert: { name: a.expert_id.name, slug: a.expert_id.slug },
+            slug: a.slug,
+            tags: a.tags,
+            views: a.views,
+          });
+        }
+      });
+
+      // Fetch recently approved clubs
+      const clubQuery = { status: "active" };
+      if (before) clubQuery.approved_at = { $lt: new Date(before) };
+      const recentClubs = await Club.find(clubQuery)
+        .sort({ approved_at: -1 })
+        .limit(10)
+        .select("name slug country league approved_at");
+
+      recentClubs.forEach(c => {
+        feedItems.push({
+          type: "club_joined",
+          icon: "🏟️",
+          title: `${c.name} joined FOFA`,
+          subtitle: `${c.league}, ${c.country}`,
+          timestamp: c.approved_at,
+          club: { name: c.name, slug: c.slug },
+        });
+      });
+
+      // Sort all items by timestamp descending, limit
+      feedItems.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      const trimmed = feedItems.slice(0, limit);
+
+      return res.status(200).json({
+        feed: trimmed,
+        has_more: feedItems.length > limit,
+        next_before: trimmed.length > 0 ? trimmed[trimmed.length - 1].timestamp : null,
+      });
+    }
+
+    // ========================================================================
+    // ACHIEVEMENT BADGES ENDPOINTS
+    // ========================================================================
+
+    // GET /user/badges — get current user's badges
+    if (pathname === "/api/user/badges" && req.method === "GET") {
+      const decoded = verifyToken(req);
+      const user = await User.findById(decoded.id).select("badges");
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      // Also compute any un-awarded badges they've earned
+      const newBadges = await computeEarnedBadges(decoded.id);
+      const allBadges = [...(user.badges || [])];
+
+      // Award new ones
+      if (newBadges.length > 0) {
+        for (const b of newBadges) {
+          if (!allBadges.find(existing => existing.badge_id === b.badge_id)) {
+            allBadges.push(b);
+          }
+        }
+        user.badges = allBadges;
+        await user.save();
+      }
+
+      return res.status(200).json({
+        badges: allBadges,
+        available_badges: BADGE_DEFINITIONS,
+      });
+    }
+
+    // GET /user/passport — enriched fan passport data
+    if (pathname === "/api/user/passport" && req.method === "GET") {
+      const decoded = verifyToken(req);
+      const user = await User.findById(decoded.id);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      // Get following clubs
+      const followingClubs = await Club.find({
+        _id: { $in: user.following_clubs || [] },
+        status: "active",
+      }).select("name slug country league fan_count logo_url");
+
+      // Get activity stats
+      const activityCount = await Activity.countDocuments({ user_id: decoded.id });
+      const recentActivities = await Activity.find({ user_id: decoded.id })
+        .sort({ created_at: -1 })
+        .limit(10);
+
+      // Get referral count
+      const referralCount = await User.countDocuments({ referred_by: decoded.id });
+
+      // Compute badges
+      const newBadges = await computeEarnedBadges(decoded.id);
+      const allBadges = [...(user.badges || [])];
+      if (newBadges.length > 0) {
+        for (const b of newBadges) {
+          if (!allBadges.find(existing => existing.badge_id === b.badge_id)) {
+            allBadges.push(b);
+          }
+        }
+        user.badges = allBadges;
+        await user.save();
+      }
+
+      // Leaderboard position
+      const rank = await User.countDocuments({ total_score: { $gt: user.total_score } }) + 1;
+
+      return res.status(200).json({
+        passport: {
+          user: {
+            display_name: user.display_name,
+            username: user.username,
+            email: user.email,
+            favorite_club: user.favorite_club,
+            bio: user.bio,
+            created_at: user.created_at,
+            level: user.level,
+          },
+          scores: {
+            total_score: user.total_score,
+            engagement_score: user.engagement_score,
+            passion_score: user.passion_score,
+            knowledge_score: user.knowledge_score,
+            consistency_score: user.consistency_score,
+            community_score: user.community_score,
+            growth_score: user.growth_score,
+          },
+          rank,
+          following_clubs: followingClubs,
+          badges: allBadges,
+          available_badges: BADGE_DEFINITIONS,
+          stats: {
+            activity_count: activityCount,
+            following_count: (user.following_clubs || []).length,
+            referral_count: referralCount,
+            badge_count: allBadges.length,
+          },
+          recent_activities: recentActivities.map(a => ({
+            type: a.activity_type,
+            description: a.description,
+            points: a.points,
+            created_at: a.created_at,
+          })),
+        },
+      });
     }
 
     return res.status(404).json({ error: "Endpoint not found", path: pathname });

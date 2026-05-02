@@ -366,6 +366,71 @@ const ExpertApplication = mongoose.models.ExpertApplication || mongoose.model("E
 const Expert = mongoose.models.Expert || mongoose.model("Expert", expertSchema);
 const Endorsement = mongoose.models.Endorsement || mongoose.model("Endorsement", endorsementSchema);
 
+// ============================================================================
+// ARTICLE SCHEMA (Voice publishing - experts write content)
+// ============================================================================
+
+const articleSchema = new mongoose.Schema({
+  expert_id: { type: mongoose.Schema.Types.ObjectId, ref: "Expert", required: true, index: true },
+
+  title: { type: String, required: true },
+  slug: { type: String, required: true, unique: true, lowercase: true, index: true },
+  content: { type: String, required: true },
+  summary: { type: String, default: "" },
+  tags: { type: [String], default: [] },
+
+  // Linked clubs (optional)
+  club_ids: [{ type: mongoose.Schema.Types.ObjectId, ref: "Club" }],
+
+  status: {
+    type: String,
+    enum: ["draft", "published"],
+    default: "draft",
+    index: true,
+  },
+
+  views: { type: Number, default: 0 },
+  published_at: { type: Date, default: null },
+  created_at: { type: Date, default: Date.now },
+  updated_at: { type: Date, default: Date.now },
+});
+
+const Article = mongoose.models.Article || mongoose.model("Article", articleSchema);
+
+// ============================================================================
+// REPORT SCHEMA (Ambassador moderation - community reporting)
+// ============================================================================
+
+const reportSchema = new mongoose.Schema({
+  reporter_expert_id: { type: mongoose.Schema.Types.ObjectId, ref: "Expert", required: true, index: true },
+
+  target_type: {
+    type: String,
+    enum: ["activity", "user", "endorsement", "article", "club"],
+    required: true,
+  },
+  target_id: { type: String, required: true },
+  target_name: { type: String, default: "" }, // Display name for reference
+
+  reason: { type: String, required: true },
+  details: { type: String, default: "" },
+
+  status: {
+    type: String,
+    enum: ["pending", "reviewing", "resolved", "dismissed"],
+    default: "pending",
+    index: true,
+  },
+
+  resolved_by: { type: String, default: null }, // Admin email
+  resolution_note: { type: String, default: "" },
+  resolved_at: { type: Date, default: null },
+
+  created_at: { type: Date, default: Date.now, index: true },
+});
+
+const Report = mongoose.models.Report || mongoose.model("Report", reportSchema);
+
 function calculateLevel(totalScore) {
   if (totalScore >= 5000) return "legend";
   if (totalScore >= 3000) return "master";
@@ -2278,6 +2343,407 @@ export default async function handler(req, res) {
         is_admin: isAdmin(decoded),
         admin_emails_configured: ADMIN_EMAILS.length > 0,
       });
+    }
+
+    // ========================================================================
+    // ARTICLE ENDPOINTS (Voice publishing)
+    // ========================================================================
+
+    // Helper: generate unique article slug
+    async function ensureUniqueArticleSlug(title) {
+      let baseSlug = slugifyName(title);
+      if (!baseSlug) baseSlug = "article";
+      let slug = baseSlug;
+      let counter = 0;
+      while (await Article.findOne({ slug })) {
+        counter++;
+        slug = `${baseSlug}-${counter}`;
+      }
+      return slug;
+    }
+
+    // Helper: find expert from token
+    async function findExpertFromToken(decoded) {
+      if (!decoded) return null;
+      const user = await User.findById(decoded.userId);
+      if (!user) return null;
+      let expert = await Expert.findOne({ user_id: decoded.userId, status: "active" });
+      if (!expert) {
+        const application = await ExpertApplication.findOne({
+          email: user.email.toLowerCase(),
+          status: "approved",
+        });
+        if (application && application.approved_expert_id) {
+          expert = await Expert.findById(application.approved_expert_id);
+        }
+      }
+      return expert && expert.status === "active" ? expert : null;
+    }
+
+    // Create article (expert only)
+    if (pathname.endsWith("/experts/articles") && req.method === "POST") {
+      const decoded = verifyToken(req);
+      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
+      const expert = await findExpertFromToken(decoded);
+      if (!expert) return res.status(403).json({ error: "Expert access required" });
+
+      const { title, content, summary, tags, club_ids, status: articleStatus } = req.body || {};
+      if (!title || !content) {
+        return res.status(400).json({ error: "Title and content are required" });
+      }
+      if (content.length < 50) {
+        return res.status(400).json({ error: "Content must be at least 50 characters" });
+      }
+
+      const slug = await ensureUniqueArticleSlug(title);
+      const now = new Date();
+      const isPublished = articleStatus === "published";
+
+      const article = await Article.create({
+        expert_id: expert._id,
+        title: title.trim(),
+        slug,
+        content: content.trim(),
+        summary: (summary || "").trim(),
+        tags: Array.isArray(tags) ? tags.map(t => t.trim()).filter(Boolean) : [],
+        club_ids: Array.isArray(club_ids) ? club_ids.filter(Boolean) : [],
+        status: isPublished ? "published" : "draft",
+        published_at: isPublished ? now : null,
+        created_at: now,
+        updated_at: now,
+      });
+
+      return res.status(201).json({
+        message: isPublished ? "Article published" : "Draft saved",
+        article: {
+          id: article._id.toString(),
+          slug: article.slug,
+          title: article.title,
+          status: article.status,
+        },
+      });
+    }
+
+    // List own articles (expert only)
+    if (pathname.endsWith("/experts/articles") && req.method === "GET") {
+      const decoded = verifyToken(req);
+      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
+      const expert = await findExpertFromToken(decoded);
+      if (!expert) return res.status(403).json({ error: "Expert access required" });
+
+      const articles = await Article.find({ expert_id: expert._id })
+        .sort({ updated_at: -1 })
+        .select("title slug summary tags status views published_at created_at updated_at");
+
+      return res.status(200).json({
+        articles: articles.map(a => ({
+          id: a._id.toString(),
+          title: a.title,
+          slug: a.slug,
+          summary: a.summary,
+          tags: a.tags,
+          status: a.status,
+          views: a.views,
+          published_at: a.published_at,
+          created_at: a.created_at,
+          updated_at: a.updated_at,
+        })),
+      });
+    }
+
+    // Update article (expert only, own articles)
+    if (pathname.match(/\/experts\/articles\/[^\/]+$/) && req.method === "PATCH") {
+      const decoded = verifyToken(req);
+      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
+      const expert = await findExpertFromToken(decoded);
+      if (!expert) return res.status(403).json({ error: "Expert access required" });
+
+      const articleId = pathname.split("/").pop();
+      const article = await Article.findById(articleId);
+      if (!article) return res.status(404).json({ error: "Article not found" });
+      if (article.expert_id.toString() !== expert._id.toString()) {
+        return res.status(403).json({ error: "You can only edit your own articles" });
+      }
+
+      const data = req.body || {};
+      const allowedFields = ["title", "content", "summary", "tags", "club_ids", "status"];
+      for (const field of allowedFields) {
+        if (data[field] !== undefined) {
+          if (field === "tags") {
+            article.tags = Array.isArray(data.tags) ? data.tags.map(t => t.trim()).filter(Boolean) : [];
+          } else if (field === "club_ids") {
+            article.club_ids = Array.isArray(data.club_ids) ? data.club_ids.filter(Boolean) : [];
+          } else if (field === "status") {
+            if (data.status === "published" && article.status !== "published") {
+              article.status = "published";
+              article.published_at = new Date();
+            } else if (data.status === "draft") {
+              article.status = "draft";
+            }
+          } else {
+            article[field] = String(data[field]).trim();
+          }
+        }
+      }
+
+      article.updated_at = new Date();
+      await article.save();
+
+      return res.status(200).json({
+        message: "Article updated",
+        article: {
+          id: article._id.toString(),
+          slug: article.slug,
+          title: article.title,
+          status: article.status,
+        },
+      });
+    }
+
+    // Delete article (expert only, own articles)
+    if (pathname.match(/\/experts\/articles\/[^\/]+$/) && req.method === "DELETE") {
+      const decoded = verifyToken(req);
+      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
+      const expert = await findExpertFromToken(decoded);
+      if (!expert) return res.status(403).json({ error: "Expert access required" });
+
+      const articleId = pathname.split("/").pop();
+      const article = await Article.findById(articleId);
+      if (!article) return res.status(404).json({ error: "Article not found" });
+      if (article.expert_id.toString() !== expert._id.toString()) {
+        return res.status(403).json({ error: "You can only delete your own articles" });
+      }
+
+      await Article.findByIdAndDelete(articleId);
+      return res.status(200).json({ message: "Article deleted" });
+    }
+
+    // Public: List published articles
+    if (pathname.endsWith("/articles") && req.method === "GET" && !pathname.includes("/experts/")) {
+      const params = new URL(req.url, `http://${req.headers.host}`).searchParams;
+      const limit = Math.min(parseInt(params.get("limit") || "20"), 50);
+      const offset = parseInt(params.get("offset") || "0");
+      const tag = params.get("tag");
+      const expert_slug = params.get("expert");
+
+      const query = { status: "published" };
+      if (tag) query.tags = tag;
+      if (expert_slug) {
+        const exp = await Expert.findOne({ slug: expert_slug, status: "active" });
+        if (exp) query.expert_id = exp._id;
+      }
+
+      const [articles, total] = await Promise.all([
+        Article.find(query)
+          .sort({ published_at: -1 })
+          .skip(offset)
+          .limit(limit)
+          .populate("expert_id", "full_name display_name slug expert_type tier profile_pic"),
+        Article.countDocuments(query),
+      ]);
+
+      return res.status(200).json({
+        articles: articles.map(a => ({
+          id: a._id.toString(),
+          title: a.title,
+          slug: a.slug,
+          summary: a.summary,
+          tags: a.tags,
+          views: a.views,
+          published_at: a.published_at,
+          expert: a.expert_id ? {
+            full_name: a.expert_id.full_name,
+            display_name: a.expert_id.display_name,
+            slug: a.expert_id.slug,
+            expert_type: a.expert_id.expert_type,
+            tier: a.expert_id.tier,
+            profile_pic: a.expert_id.profile_pic,
+          } : null,
+        })),
+        meta: { total, limit, offset },
+      });
+    }
+
+    // Public: Get single article by slug
+    if (pathname.match(/\/articles\/[a-z0-9-]+$/) && req.method === "GET" && !pathname.includes("/experts/")) {
+      const slug = pathname.split("/").pop();
+      const article = await Article.findOne({ slug, status: "published" })
+        .populate("expert_id", "full_name display_name slug expert_type tier profile_pic current_role");
+
+      if (!article) return res.status(404).json({ error: "Article not found" });
+
+      // Increment views
+      article.views += 1;
+      await article.save();
+
+      return res.status(200).json({
+        article: {
+          id: article._id.toString(),
+          title: article.title,
+          slug: article.slug,
+          content: article.content,
+          summary: article.summary,
+          tags: article.tags,
+          views: article.views,
+          published_at: article.published_at,
+          created_at: article.created_at,
+          expert: article.expert_id ? {
+            full_name: article.expert_id.full_name,
+            display_name: article.expert_id.display_name,
+            slug: article.expert_id.slug,
+            expert_type: article.expert_id.expert_type,
+            tier: article.expert_id.tier,
+            profile_pic: article.expert_id.profile_pic,
+            current_role: article.expert_id.current_role,
+          } : null,
+        },
+      });
+    }
+
+    // ========================================================================
+    // REPORT ENDPOINTS (Ambassador moderation)
+    // ========================================================================
+
+    // Submit report (ambassador experts only)
+    if (pathname.endsWith("/experts/reports") && req.method === "POST") {
+      const decoded = verifyToken(req);
+      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
+      const expert = await findExpertFromToken(decoded);
+      if (!expert) return res.status(403).json({ error: "Expert access required" });
+      if (expert.expert_type !== "ambassador") {
+        return res.status(403).json({ error: "Ambassador role required for moderation" });
+      }
+
+      const { target_type, target_id, target_name, reason, details } = req.body || {};
+      if (!target_type || !target_id || !reason) {
+        return res.status(400).json({ error: "target_type, target_id, and reason are required" });
+      }
+      if (!["activity", "user", "endorsement", "article", "club"].includes(target_type)) {
+        return res.status(400).json({ error: "Invalid target_type" });
+      }
+      if (reason.length < 10) {
+        return res.status(400).json({ error: "Reason must be at least 10 characters" });
+      }
+
+      // Check for duplicate recent report
+      const recentDupe = await Report.findOne({
+        reporter_expert_id: expert._id,
+        target_type,
+        target_id,
+        status: { $in: ["pending", "reviewing"] },
+      });
+      if (recentDupe) {
+        return res.status(409).json({ error: "You already have an open report for this item" });
+      }
+
+      const report = await Report.create({
+        reporter_expert_id: expert._id,
+        target_type,
+        target_id,
+        target_name: (target_name || "").trim(),
+        reason: reason.trim(),
+        details: (details || "").trim(),
+      });
+
+      return res.status(201).json({
+        message: "Report submitted",
+        report: { id: report._id.toString(), status: report.status },
+      });
+    }
+
+    // List own reports (ambassador only)
+    if (pathname.endsWith("/experts/reports") && req.method === "GET") {
+      const decoded = verifyToken(req);
+      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
+      const expert = await findExpertFromToken(decoded);
+      if (!expert) return res.status(403).json({ error: "Expert access required" });
+
+      const reports = await Report.find({ reporter_expert_id: expert._id })
+        .sort({ created_at: -1 })
+        .limit(50);
+
+      return res.status(200).json({
+        reports: reports.map(r => ({
+          id: r._id.toString(),
+          target_type: r.target_type,
+          target_id: r.target_id,
+          target_name: r.target_name,
+          reason: r.reason,
+          details: r.details,
+          status: r.status,
+          resolution_note: r.resolution_note,
+          resolved_at: r.resolved_at,
+          created_at: r.created_at,
+        })),
+      });
+    }
+
+    // Admin: list all reports
+    if (pathname.endsWith("/admin/reports") && req.method === "GET") {
+      const decoded = verifyToken(req);
+      if (!isAdmin(decoded)) return res.status(403).json({ error: "Admin access required" });
+
+      const params = new URL(req.url, `http://${req.headers.host}`).searchParams;
+      const status = params.get("status");
+      const query = {};
+      if (status) query.status = status;
+
+      const reports = await Report.find(query)
+        .sort({ created_at: -1 })
+        .limit(100)
+        .populate("reporter_expert_id", "full_name display_name slug expert_type tier");
+
+      return res.status(200).json({
+        reports: reports.map(r => ({
+          id: r._id.toString(),
+          reporter: r.reporter_expert_id ? {
+            full_name: r.reporter_expert_id.full_name,
+            slug: r.reporter_expert_id.slug,
+            tier: r.reporter_expert_id.tier,
+          } : null,
+          target_type: r.target_type,
+          target_id: r.target_id,
+          target_name: r.target_name,
+          reason: r.reason,
+          details: r.details,
+          status: r.status,
+          resolution_note: r.resolution_note,
+          resolved_by: r.resolved_by,
+          resolved_at: r.resolved_at,
+          created_at: r.created_at,
+        })),
+        counts: {
+          pending: await Report.countDocuments({ status: "pending" }),
+          reviewing: await Report.countDocuments({ status: "reviewing" }),
+          resolved: await Report.countDocuments({ status: "resolved" }),
+          dismissed: await Report.countDocuments({ status: "dismissed" }),
+        },
+      });
+    }
+
+    // Admin: resolve/dismiss report
+    if (pathname.match(/\/admin\/reports\/[^\/]+$/) && req.method === "PATCH") {
+      const decoded = verifyToken(req);
+      if (!isAdmin(decoded)) return res.status(403).json({ error: "Admin access required" });
+
+      const reportId = pathname.split("/").pop();
+      const report = await Report.findById(reportId);
+      if (!report) return res.status(404).json({ error: "Report not found" });
+
+      const { status: newStatus, resolution_note } = req.body || {};
+      if (!["reviewing", "resolved", "dismissed"].includes(newStatus)) {
+        return res.status(400).json({ error: "Status must be reviewing, resolved, or dismissed" });
+      }
+
+      report.status = newStatus;
+      if (newStatus === "resolved" || newStatus === "dismissed") {
+        report.resolved_by = decoded.email;
+        report.resolution_note = (resolution_note || "").trim();
+        report.resolved_at = new Date();
+      }
+      await report.save();
+
+      return res.status(200).json({ message: `Report ${newStatus}` });
     }
 
     return res.status(404).json({ error: "Endpoint not found", path: pathname });

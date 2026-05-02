@@ -174,6 +174,8 @@ export default function ExpertDashboard() {
             {[
               { id: "clubs", label: "🏟️ Endorse Clubs" },
               { id: "endorsements", label: "📜 My Endorsements" },
+              { id: "articles", label: "📝 My Articles" },
+              ...(expert.expert_type === "ambassador" ? [{ id: "moderation", label: "🎖️ Moderation" }] : []),
               { id: "profile", label: "👤 My Profile" },
             ].map(tab => (
               <button
@@ -202,6 +204,8 @@ export default function ExpertDashboard() {
           {/* Tab Content */}
           {activeTab === "clubs" && <ClubsToEndorse clubs={clubs} expert={expert} token={token} onEndorsed={loadExpertProfile} />}
           {activeTab === "endorsements" && <MyEndorsements expertId={expert.id} expertSlug={expert.slug} token={token} onChanged={loadExpertProfile} />}
+          {activeTab === "articles" && <MyArticles expert={expert} token={token} clubs={clubs} />}
+          {activeTab === "moderation" && expert.expert_type === "ambassador" && <ModerationPanel expert={expert} token={token} />}
           {activeTab === "profile" && <ProfileEditor expert={expert} token={token} onSaved={loadExpertProfile} />}
         </div>
       </div>
@@ -878,7 +882,1221 @@ function MyEndorsements({ expertId, expertSlug, token, onChanged }) {
 }
 
 // ============================================================================
-// PROFILE PREVIEW
+// MY ARTICLES (Voice Publishing)
+// ============================================================================
+
+function MyArticles({ expert, token, clubs }) {
+  const [articles, setArticles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState("list"); // list | form
+  const [editingArticle, setEditingArticle] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+
+  // Form state
+  const [form, setForm] = useState({ title: "", content: "", summary: "", tags: "", club_ids: [] });
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+
+  useEffect(() => { fetchArticles(); }, []);
+
+  async function fetchArticles() {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/experts/articles`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setArticles(data.articles || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function openNewForm() {
+    setEditingArticle(null);
+    setForm({ title: "", content: "", summary: "", tags: "", club_ids: [] });
+    setFeedback(null);
+    setView("form");
+  }
+
+  function openEditForm(article) {
+    setEditingArticle(article);
+    setForm({
+      title: article.title,
+      content: article.content,
+      summary: article.summary || "",
+      tags: (article.tags || []).join(", "),
+      club_ids: article.club_ids || [],
+    });
+    setFeedback(null);
+    setView("form");
+  }
+
+  async function handleSave() {
+    if (!form.title.trim() || !form.content.trim()) {
+      setFeedback({ type: "error", message: "Title and content are required" });
+      return;
+    }
+    setSaving(true);
+    setFeedback(null);
+    try {
+      const payload = {
+        title: form.title.trim(),
+        content: form.content.trim(),
+        summary: form.summary.trim(),
+        tags: form.tags.split(",").map(s => s.trim()).filter(Boolean),
+        club_ids: form.club_ids,
+      };
+
+      const url = editingArticle
+        ? `${API_URL}/experts/articles/${editingArticle._id}`
+        : `${API_URL}/experts/articles`;
+      const method = editingArticle ? "PATCH" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Save failed");
+      }
+
+      setView("list");
+      fetchArticles();
+    } catch (err) {
+      setFeedback({ type: "error", message: err.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleTogglePublish(article) {
+    try {
+      const newStatus = article.status === "published" ? "draft" : "published";
+      const res = await fetch(`${API_URL}/experts/articles/${article._id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Update failed");
+      }
+      fetchArticles();
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+    }
+  }
+
+  async function handleDelete(articleId) {
+    try {
+      const res = await fetch(`${API_URL}/experts/articles/${articleId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Delete failed");
+      }
+      setDeletingId(null);
+      fetchArticles();
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+    }
+  }
+
+  const inputStyle = {
+    width: "100%",
+    background: COLORS.bg,
+    border: `1px solid ${COLORS.hairlineStrong}`,
+    color: "#F2F5EE",
+    padding: "12px 14px",
+    borderRadius: 4,
+    fontSize: 14,
+    fontFamily: "'Crimson Pro', serif",
+    outline: "none",
+    boxSizing: "border-box",
+    transition: "border-color 0.2s",
+  };
+
+  const labelStyle = {
+    display: "block",
+    fontSize: 11,
+    fontFamily: "'DM Mono', monospace",
+    color: COLORS.body,
+    opacity: 0.7,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    marginBottom: 6,
+  };
+
+  // ── Form View ──
+  if (view === "form") {
+    return (
+      <div>
+        <button
+          onClick={() => setView("list")}
+          style={{
+            background: "transparent",
+            border: `1px solid ${COLORS.hairline}`,
+            color: COLORS.body,
+            padding: "8px 14px",
+            borderRadius: 4,
+            fontSize: 11,
+            fontFamily: "'DM Mono', monospace",
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+            marginBottom: 24,
+          }}
+        >
+          ← Back to articles
+        </button>
+
+        <div style={{
+          background: COLORS.bgSoft,
+          border: `1px solid ${COLORS.hairline}`,
+          borderRadius: 8,
+          padding: 32,
+        }}>
+          <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.gold, letterSpacing: "0.2em", marginBottom: 24 }}>
+            {editingArticle ? "EDIT ARTICLE" : "NEW ARTICLE"}
+          </div>
+
+          {feedback && (
+            <div style={{
+              background: feedback.type === "success" ? COLORS.green + "15" : COLORS.red + "15",
+              border: `1px solid ${feedback.type === "success" ? COLORS.green : COLORS.red}40`,
+              borderRadius: 4,
+              padding: "12px 16px",
+              marginBottom: 20,
+              fontSize: 13,
+              color: feedback.type === "success" ? COLORS.green : COLORS.red,
+              fontFamily: "'DM Mono', monospace",
+            }}>
+              {feedback.type === "success" ? "✓" : "✕"} {feedback.message}
+            </div>
+          )}
+
+          {/* Title */}
+          <div style={{ marginBottom: 20 }}>
+            <label style={labelStyle}>Title *</label>
+            <input
+              type="text"
+              value={form.title}
+              onChange={e => setForm(prev => ({ ...prev, title: e.target.value }))}
+              placeholder="Your article title"
+              style={{ ...inputStyle, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, fontWeight: 700, padding: "14px 16px" }}
+              onFocus={e => e.target.style.borderColor = COLORS.green}
+              onBlur={e => e.target.style.borderColor = COLORS.hairlineStrong}
+            />
+          </div>
+
+          {/* Summary */}
+          <div style={{ marginBottom: 20 }}>
+            <label style={labelStyle}>Summary</label>
+            <input
+              type="text"
+              value={form.summary}
+              onChange={e => setForm(prev => ({ ...prev, summary: e.target.value }))}
+              placeholder="A short summary shown in article previews"
+              style={inputStyle}
+              onFocus={e => e.target.style.borderColor = COLORS.green}
+              onBlur={e => e.target.style.borderColor = COLORS.hairlineStrong}
+            />
+          </div>
+
+          {/* Content */}
+          <div style={{ marginBottom: 20 }}>
+            <label style={labelStyle}>Content *</label>
+            <textarea
+              value={form.content}
+              onChange={e => setForm(prev => ({ ...prev, content: e.target.value }))}
+              placeholder="Write your article here..."
+              rows={12}
+              style={{ ...inputStyle, resize: "vertical", lineHeight: 1.7 }}
+              onFocus={e => e.target.style.borderColor = COLORS.green}
+              onBlur={e => e.target.style.borderColor = COLORS.hairlineStrong}
+            />
+            <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.4, marginTop: 4 }}>
+              {form.content.length} characters
+            </div>
+          </div>
+
+          {/* Tags */}
+          <div style={{ marginBottom: 20 }}>
+            <label style={labelStyle}>Tags (comma-separated)</label>
+            <input
+              type="text"
+              value={form.tags}
+              onChange={e => setForm(prev => ({ ...prev, tags: e.target.value }))}
+              placeholder="e.g., Tactics, Premier League, Match Analysis"
+              style={inputStyle}
+              onFocus={e => e.target.style.borderColor = COLORS.green}
+              onBlur={e => e.target.style.borderColor = COLORS.hairlineStrong}
+            />
+          </div>
+
+          {/* Linked Clubs */}
+          {clubs.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <label style={labelStyle}>Link to Clubs (optional)</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+                {clubs.slice(0, 20).map(club => {
+                  const isSelected = form.club_ids.includes(club.id);
+                  return (
+                    <button
+                      key={club.id}
+                      onClick={() => {
+                        setForm(prev => ({
+                          ...prev,
+                          club_ids: isSelected
+                            ? prev.club_ids.filter(id => id !== club.id)
+                            : [...prev.club_ids, club.id],
+                        }));
+                      }}
+                      style={{
+                        background: isSelected ? COLORS.green + "20" : "transparent",
+                        border: `1px solid ${isSelected ? COLORS.green : COLORS.hairlineStrong}`,
+                        color: isSelected ? COLORS.green : COLORS.body,
+                        padding: "6px 12px",
+                        fontSize: 11,
+                        fontFamily: "'DM Mono', monospace",
+                        borderRadius: 20,
+                        cursor: "pointer",
+                        transition: "all 0.2s",
+                      }}
+                    >
+                      {isSelected ? "✓ " : ""}{club.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Save button */}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              width: "100%",
+              background: COLORS.green,
+              color: COLORS.bg,
+              border: "none",
+              padding: "16px 28px",
+              fontSize: 13,
+              fontFamily: "'DM Mono', monospace",
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              fontWeight: 700,
+              borderRadius: 4,
+              cursor: saving ? "not-allowed" : "pointer",
+              opacity: saving ? 0.6 : 1,
+            }}
+          >
+            {saving ? "Saving..." : editingArticle ? "Update Article" : "Save as Draft"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── List View ──
+  if (loading) {
+    return <div style={{ padding: 40, textAlign: "center", color: COLORS.body, opacity: 0.6 }}>Loading articles...</div>;
+  }
+
+  return (
+    <div>
+      {/* Header row */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.6, letterSpacing: "0.1em" }}>
+          {articles.length} ARTICLE{articles.length !== 1 ? "S" : ""}
+        </div>
+        <button
+          onClick={openNewForm}
+          style={{
+            background: COLORS.green,
+            color: COLORS.bg,
+            border: "none",
+            padding: "10px 20px",
+            fontSize: 11,
+            fontFamily: "'DM Mono', monospace",
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            fontWeight: 700,
+            borderRadius: 4,
+            cursor: "pointer",
+          }}
+        >
+          + New Article
+        </button>
+      </div>
+
+      {articles.length === 0 ? (
+        <div style={{
+          textAlign: "center",
+          padding: 60,
+          background: COLORS.bgSoft,
+          border: `1px solid ${COLORS.hairline}`,
+          borderRadius: 4,
+        }}>
+          <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.4 }}>📝</div>
+          <h3 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, color: "#F2F5EE", margin: "0 0 8px" }}>
+            No articles yet
+          </h3>
+          <p style={{ color: COLORS.body, opacity: 0.6, margin: "0 0 20px", fontSize: 14 }}>
+            Share your expertise with the FOFA community.
+          </p>
+          <button
+            onClick={openNewForm}
+            style={{
+              background: COLORS.green,
+              color: COLORS.bg,
+              border: "none",
+              padding: "12px 24px",
+              fontSize: 12,
+              fontFamily: "'DM Mono', monospace",
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              fontWeight: 700,
+              borderRadius: 4,
+              cursor: "pointer",
+            }}
+          >
+            Write Your First Article
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {articles.map(article => (
+            <div
+              key={article._id}
+              style={{
+                background: COLORS.bgSoft,
+                border: `1px solid ${COLORS.hairline}`,
+                borderRadius: 4,
+                padding: 20,
+              }}
+            >
+              {/* Status badge + title */}
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 8 }}>
+                <span style={{
+                  display: "inline-block",
+                  padding: "3px 10px",
+                  borderRadius: 20,
+                  fontSize: 10,
+                  fontFamily: "'DM Mono', monospace",
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  fontWeight: 700,
+                  flexShrink: 0,
+                  marginTop: 4,
+                  background: article.status === "published" ? COLORS.green + "20" : COLORS.gold + "20",
+                  color: article.status === "published" ? COLORS.green : COLORS.gold,
+                  border: `1px solid ${article.status === "published" ? COLORS.green : COLORS.gold}40`,
+                }}>
+                  {article.status === "published" ? "Live" : "Draft"}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <h3 style={{
+                    fontFamily: "'Barlow Condensed', sans-serif",
+                    fontSize: 20,
+                    fontWeight: 900,
+                    color: "#F2F5EE",
+                    margin: 0,
+                    lineHeight: 1.2,
+                  }}>
+                    {article.title}
+                  </h3>
+                  {article.summary && (
+                    <p style={{ color: COLORS.body, opacity: 0.7, fontSize: 13, margin: "6px 0 0", lineHeight: 1.5 }}>
+                      {article.summary}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Tags */}
+              {article.tags && article.tags.length > 0 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                  {article.tags.map((tag, i) => (
+                    <span key={i} style={{
+                      fontSize: 10,
+                      fontFamily: "'DM Mono', monospace",
+                      color: COLORS.teal,
+                      background: COLORS.teal + "10",
+                      border: `1px solid ${COLORS.teal}30`,
+                      padding: "2px 8px",
+                      borderRadius: 12,
+                      letterSpacing: "0.05em",
+                    }}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Delete confirmation */}
+              {deletingId === article._id ? (
+                <div style={{
+                  background: COLORS.bg,
+                  border: `1px solid ${COLORS.red}40`,
+                  borderRadius: 4,
+                  padding: 16,
+                  marginTop: 8,
+                }}>
+                  <p style={{ color: COLORS.body, fontSize: 13, margin: "0 0 12px" }}>
+                    Delete this article? This cannot be undone.
+                  </p>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => handleDelete(article._id)}
+                      style={{
+                        background: COLORS.red,
+                        color: "#fff",
+                        border: "none",
+                        padding: "8px 16px",
+                        fontSize: 11,
+                        fontFamily: "'DM Mono', monospace",
+                        letterSpacing: "0.1em",
+                        textTransform: "uppercase",
+                        borderRadius: 4,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Yes, Delete
+                    </button>
+                    <button
+                      onClick={() => setDeletingId(null)}
+                      style={{
+                        background: "transparent",
+                        color: COLORS.body,
+                        border: `1px solid ${COLORS.hairlineStrong}`,
+                        padding: "8px 16px",
+                        fontSize: 11,
+                        fontFamily: "'DM Mono', monospace",
+                        letterSpacing: "0.1em",
+                        textTransform: "uppercase",
+                        borderRadius: 4,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Meta row + actions */
+                <div style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginTop: 4,
+                  flexWrap: "wrap",
+                  gap: 8,
+                }}>
+                  <div style={{ display: "flex", gap: 16, fontSize: 10, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.4, letterSpacing: "0.1em" }}>
+                    <span>{new Date(article.created_at).toLocaleDateString()}</span>
+                    {article.views > 0 && <span>{article.views} views</span>}
+                    {article.slug && article.status === "published" && (
+                      <a
+                        href={`#articles/${article.slug}`}
+                        style={{ color: COLORS.teal, textDecoration: "none" }}
+                      >
+                        View →
+                      </a>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => handleTogglePublish(article)}
+                      style={{
+                        background: "transparent",
+                        border: `1px solid ${article.status === "published" ? COLORS.gold : COLORS.green}40`,
+                        color: article.status === "published" ? COLORS.gold : COLORS.green,
+                        padding: "5px 12px",
+                        fontSize: 10,
+                        fontFamily: "'DM Mono', monospace",
+                        letterSpacing: "0.1em",
+                        textTransform: "uppercase",
+                        borderRadius: 3,
+                        cursor: "pointer",
+                        transition: "all 0.2s",
+                      }}
+                    >
+                      {article.status === "published" ? "Unpublish" : "Publish"}
+                    </button>
+                    <button
+                      onClick={() => openEditForm(article)}
+                      style={{
+                        background: "transparent",
+                        border: `1px solid ${COLORS.hairlineStrong}`,
+                        color: COLORS.teal,
+                        padding: "5px 12px",
+                        fontSize: 10,
+                        fontFamily: "'DM Mono', monospace",
+                        letterSpacing: "0.1em",
+                        textTransform: "uppercase",
+                        borderRadius: 3,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => setDeletingId(article._id)}
+                      style={{
+                        background: "transparent",
+                        border: `1px solid ${COLORS.hairlineStrong}`,
+                        color: COLORS.red,
+                        padding: "5px 12px",
+                        fontSize: 10,
+                        fontFamily: "'DM Mono', monospace",
+                        letterSpacing: "0.1em",
+                        textTransform: "uppercase",
+                        borderRadius: 3,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// MODERATION PANEL (Ambassador Tools)
+// ============================================================================
+
+function ModerationPanel({ expert, token }) {
+  const [activeView, setActiveView] = useState("my_reports"); // my_reports | new_report | admin_queue
+  const [reports, setReports] = useState([]);
+  const [adminReports, setAdminReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // New report form
+  const [reportForm, setReportForm] = useState({
+    target_type: "activity",
+    target_id: "",
+    target_name: "",
+    reason: "",
+    details: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+
+  useEffect(() => { fetchReports(); }, []);
+
+  async function fetchReports() {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/experts/reports`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setReports(data.reports || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchAdminReports() {
+    try {
+      const res = await fetch(`${API_URL}/admin/reports`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setAdminReports(data.reports || []);
+    } catch (err) {
+      console.error("Admin reports:", err);
+    }
+  }
+
+  async function submitReport() {
+    if (!reportForm.target_id.trim() || !reportForm.reason.trim()) {
+      setFeedback({ type: "error", message: "Target ID and reason are required" });
+      return;
+    }
+    setSubmitting(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`${API_URL}/experts/reports`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(reportForm),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Report failed");
+      }
+      setFeedback({ type: "success", message: "Report submitted successfully" });
+      setReportForm({ target_type: "activity", target_id: "", target_name: "", reason: "", details: "" });
+      fetchReports();
+      setTimeout(() => setActiveView("my_reports"), 1500);
+    } catch (err) {
+      setFeedback({ type: "error", message: err.message });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleResolve(reportId, status, note) {
+    try {
+      const res = await fetch(`${API_URL}/admin/reports/${reportId}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ status, resolution_note: note || "" }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Update failed");
+      }
+      fetchAdminReports();
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+    }
+  }
+
+  const inputStyle = {
+    width: "100%",
+    background: COLORS.bg,
+    border: `1px solid ${COLORS.hairlineStrong}`,
+    color: "#F2F5EE",
+    padding: "12px 14px",
+    borderRadius: 4,
+    fontSize: 14,
+    fontFamily: "'Crimson Pro', serif",
+    outline: "none",
+    boxSizing: "border-box",
+    transition: "border-color 0.2s",
+  };
+
+  const labelStyle = {
+    display: "block",
+    fontSize: 11,
+    fontFamily: "'DM Mono', monospace",
+    color: COLORS.body,
+    opacity: 0.7,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    marginBottom: 6,
+  };
+
+  const STATUS_COLORS = {
+    pending: COLORS.gold,
+    reviewing: COLORS.teal,
+    resolved: COLORS.green,
+    dismissed: COLORS.body,
+  };
+
+  return (
+    <div>
+      {/* Sub-tabs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
+        {[
+          { id: "my_reports", label: "My Reports" },
+          { id: "new_report", label: "+ File Report" },
+          { id: "admin_queue", label: "Review Queue" },
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => {
+              setActiveView(tab.id);
+              if (tab.id === "admin_queue") fetchAdminReports();
+            }}
+            style={{
+              background: activeView === tab.id ? COLORS.green + "15" : "transparent",
+              border: `1px solid ${activeView === tab.id ? COLORS.green + "60" : COLORS.hairlineStrong}`,
+              color: activeView === tab.id ? COLORS.green : COLORS.body,
+              padding: "8px 16px",
+              fontSize: 11,
+              fontFamily: "'DM Mono', monospace",
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              borderRadius: 4,
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── New Report Form ── */}
+      {activeView === "new_report" && (
+        <div style={{
+          background: COLORS.bgSoft,
+          border: `1px solid ${COLORS.hairline}`,
+          borderRadius: 8,
+          padding: 32,
+        }}>
+          <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.gold, letterSpacing: "0.2em", marginBottom: 24 }}>
+            FILE A MODERATION REPORT
+          </div>
+
+          {feedback && (
+            <div style={{
+              background: feedback.type === "success" ? COLORS.green + "15" : COLORS.red + "15",
+              border: `1px solid ${feedback.type === "success" ? COLORS.green : COLORS.red}40`,
+              borderRadius: 4,
+              padding: "12px 16px",
+              marginBottom: 20,
+              fontSize: 13,
+              color: feedback.type === "success" ? COLORS.green : COLORS.red,
+              fontFamily: "'DM Mono', monospace",
+            }}>
+              {feedback.type === "success" ? "✓" : "✕"} {feedback.message}
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+            <div>
+              <label style={labelStyle}>Target Type *</label>
+              <select
+                value={reportForm.target_type}
+                onChange={e => setReportForm(prev => ({ ...prev, target_type: e.target.value }))}
+                style={{ ...inputStyle, cursor: "pointer" }}
+              >
+                <option value="activity">Activity</option>
+                <option value="user">User</option>
+                <option value="endorsement">Endorsement</option>
+                <option value="article">Article</option>
+                <option value="club">Club</option>
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Target ID *</label>
+              <input
+                type="text"
+                value={reportForm.target_id}
+                onChange={e => setReportForm(prev => ({ ...prev, target_id: e.target.value }))}
+                placeholder="ID of the reported item"
+                style={inputStyle}
+                onFocus={e => e.target.style.borderColor = COLORS.green}
+                onBlur={e => e.target.style.borderColor = COLORS.hairlineStrong}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label style={labelStyle}>Target Name (optional)</label>
+            <input
+              type="text"
+              value={reportForm.target_name}
+              onChange={e => setReportForm(prev => ({ ...prev, target_name: e.target.value }))}
+              placeholder="Name or description for reference"
+              style={inputStyle}
+              onFocus={e => e.target.style.borderColor = COLORS.green}
+              onBlur={e => e.target.style.borderColor = COLORS.hairlineStrong}
+            />
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label style={labelStyle}>Reason *</label>
+            <input
+              type="text"
+              value={reportForm.reason}
+              onChange={e => setReportForm(prev => ({ ...prev, reason: e.target.value }))}
+              placeholder="e.g., Spam, Inappropriate content, Misinformation"
+              style={inputStyle}
+              onFocus={e => e.target.style.borderColor = COLORS.green}
+              onBlur={e => e.target.style.borderColor = COLORS.hairlineStrong}
+            />
+          </div>
+
+          <div style={{ marginBottom: 24 }}>
+            <label style={labelStyle}>Additional Details</label>
+            <textarea
+              value={reportForm.details}
+              onChange={e => setReportForm(prev => ({ ...prev, details: e.target.value }))}
+              placeholder="Provide additional context..."
+              rows={4}
+              style={{ ...inputStyle, resize: "vertical" }}
+              onFocus={e => e.target.style.borderColor = COLORS.green}
+              onBlur={e => e.target.style.borderColor = COLORS.hairlineStrong}
+            />
+          </div>
+
+          <button
+            onClick={submitReport}
+            disabled={submitting}
+            style={{
+              width: "100%",
+              background: COLORS.gold,
+              color: COLORS.bg,
+              border: "none",
+              padding: "16px 28px",
+              fontSize: 13,
+              fontFamily: "'DM Mono', monospace",
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              fontWeight: 700,
+              borderRadius: 4,
+              cursor: submitting ? "not-allowed" : "pointer",
+              opacity: submitting ? 0.6 : 1,
+            }}
+          >
+            {submitting ? "Submitting..." : "Submit Report"}
+          </button>
+        </div>
+      )}
+
+      {/* ── My Reports ── */}
+      {activeView === "my_reports" && (
+        loading ? (
+          <div style={{ padding: 40, textAlign: "center", color: COLORS.body, opacity: 0.6 }}>Loading reports...</div>
+        ) : reports.length === 0 ? (
+          <div style={{
+            textAlign: "center",
+            padding: 60,
+            background: COLORS.bgSoft,
+            border: `1px solid ${COLORS.hairline}`,
+            borderRadius: 4,
+          }}>
+            <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.4 }}>🎖️</div>
+            <h3 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, color: "#F2F5EE", margin: "0 0 8px" }}>
+              No reports filed
+            </h3>
+            <p style={{ color: COLORS.body, opacity: 0.6, margin: "0 0 20px", fontSize: 14 }}>
+              As an Ambassador, you can flag content that needs attention.
+            </p>
+            <button
+              onClick={() => setActiveView("new_report")}
+              style={{
+                background: COLORS.gold,
+                color: COLORS.bg,
+                border: "none",
+                padding: "12px 24px",
+                fontSize: 12,
+                fontFamily: "'DM Mono', monospace",
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                fontWeight: 700,
+                borderRadius: 4,
+                cursor: "pointer",
+              }}
+            >
+              File Your First Report
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {reports.map(report => (
+              <div
+                key={report._id}
+                style={{
+                  background: COLORS.bgSoft,
+                  border: `1px solid ${COLORS.hairline}`,
+                  borderRadius: 4,
+                  padding: 20,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                      <span style={{
+                        display: "inline-block",
+                        padding: "2px 8px",
+                        borderRadius: 12,
+                        fontSize: 10,
+                        fontFamily: "'DM Mono', monospace",
+                        letterSpacing: "0.1em",
+                        textTransform: "uppercase",
+                        background: (STATUS_COLORS[report.status] || COLORS.body) + "20",
+                        color: STATUS_COLORS[report.status] || COLORS.body,
+                        border: `1px solid ${(STATUS_COLORS[report.status] || COLORS.body)}40`,
+                      }}>
+                        {report.status}
+                      </span>
+                      <span style={{
+                        fontSize: 10,
+                        fontFamily: "'DM Mono', monospace",
+                        color: COLORS.body,
+                        opacity: 0.5,
+                        letterSpacing: "0.1em",
+                        textTransform: "uppercase",
+                      }}>
+                        {report.target_type}
+                      </span>
+                    </div>
+                    <div style={{ color: "#F2F5EE", fontSize: 14, fontWeight: 500, marginBottom: 4 }}>
+                      {report.reason}
+                    </div>
+                    {report.target_name && (
+                      <div style={{ fontSize: 12, color: COLORS.body, opacity: 0.6 }}>
+                        Target: {report.target_name}
+                      </div>
+                    )}
+                    {report.details && (
+                      <p style={{ fontSize: 13, color: COLORS.body, opacity: 0.7, margin: "8px 0 0", lineHeight: 1.5 }}>
+                        {report.details}
+                      </p>
+                    )}
+                    {report.resolution_note && (
+                      <div style={{
+                        marginTop: 10,
+                        padding: "8px 12px",
+                        background: COLORS.bg,
+                        border: `1px solid ${COLORS.green}30`,
+                        borderRadius: 4,
+                        fontSize: 12,
+                        color: COLORS.green,
+                        fontFamily: "'DM Mono', monospace",
+                      }}>
+                        Resolution: {report.resolution_note}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.4 }}>
+                    {new Date(report.created_at).toLocaleDateString()}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {/* ── Admin Review Queue ── */}
+      {activeView === "admin_queue" && (
+        <div>
+          <div style={{
+            background: COLORS.bg,
+            border: `1px solid ${COLORS.teal}30`,
+            borderRadius: 4,
+            padding: "12px 16px",
+            marginBottom: 20,
+            fontSize: 12,
+            color: COLORS.teal,
+            fontFamily: "'DM Mono', monospace",
+          }}>
+            Admin review queue — resolve or dismiss community reports.
+          </div>
+
+          {adminReports.length === 0 ? (
+            <div style={{
+              textAlign: "center",
+              padding: 60,
+              background: COLORS.bgSoft,
+              border: `1px solid ${COLORS.hairline}`,
+              borderRadius: 4,
+            }}>
+              <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.4 }}>✅</div>
+              <h3 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 22, color: "#F2F5EE", margin: "0 0 8px" }}>
+                Queue is clear
+              </h3>
+              <p style={{ color: COLORS.body, opacity: 0.6, margin: 0, fontSize: 14 }}>
+                No pending reports to review.
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {adminReports.map(report => (
+                <AdminReportCard key={report._id} report={report} onResolve={handleResolve} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminReportCard({ report, onResolve }) {
+  const [note, setNote] = useState("");
+  const [expanded, setExpanded] = useState(false);
+
+  const STATUS_COLORS = {
+    pending: COLORS.gold,
+    reviewing: COLORS.teal,
+    resolved: COLORS.green,
+    dismissed: COLORS.body,
+  };
+
+  return (
+    <div style={{
+      background: COLORS.bgSoft,
+      border: `1px solid ${COLORS.hairline}`,
+      borderRadius: 4,
+      padding: 20,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+            <span style={{
+              display: "inline-block",
+              padding: "2px 8px",
+              borderRadius: 12,
+              fontSize: 10,
+              fontFamily: "'DM Mono', monospace",
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              background: (STATUS_COLORS[report.status] || COLORS.body) + "20",
+              color: STATUS_COLORS[report.status] || COLORS.body,
+              border: `1px solid ${(STATUS_COLORS[report.status] || COLORS.body)}40`,
+            }}>
+              {report.status}
+            </span>
+            <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.5, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              {report.target_type} · {new Date(report.created_at).toLocaleDateString()}
+            </span>
+          </div>
+          <div style={{ color: "#F2F5EE", fontSize: 14, fontWeight: 500, marginBottom: 4 }}>
+            {report.reason}
+          </div>
+          {report.target_name && (
+            <div style={{ fontSize: 12, color: COLORS.body, opacity: 0.6, marginBottom: 4 }}>
+              Target: {report.target_name} ({report.target_id})
+            </div>
+          )}
+          {report.details && (
+            <p style={{ fontSize: 13, color: COLORS.body, opacity: 0.7, margin: "4px 0 0", lineHeight: 1.5 }}>
+              {report.details}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Action buttons for pending/reviewing reports */}
+      {(report.status === "pending" || report.status === "reviewing") && (
+        <div style={{ marginTop: 12 }}>
+          {!expanded ? (
+            <button
+              onClick={() => setExpanded(true)}
+              style={{
+                background: "transparent",
+                border: `1px solid ${COLORS.hairlineStrong}`,
+                color: COLORS.teal,
+                padding: "6px 14px",
+                fontSize: 10,
+                fontFamily: "'DM Mono', monospace",
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                borderRadius: 3,
+                cursor: "pointer",
+              }}
+            >
+              Take Action
+            </button>
+          ) : (
+            <div style={{
+              background: COLORS.bg,
+              border: `1px solid ${COLORS.hairline}`,
+              borderRadius: 4,
+              padding: 16,
+              marginTop: 8,
+            }}>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{
+                  display: "block",
+                  fontSize: 11,
+                  fontFamily: "'DM Mono', monospace",
+                  color: COLORS.body,
+                  opacity: 0.7,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  marginBottom: 6,
+                }}>
+                  Resolution Note
+                </label>
+                <input
+                  type="text"
+                  value={note}
+                  onChange={e => setNote(e.target.value)}
+                  placeholder="Optional note about your decision"
+                  style={{
+                    width: "100%",
+                    background: COLORS.bgSoft,
+                    border: `1px solid ${COLORS.hairlineStrong}`,
+                    color: "#F2F5EE",
+                    padding: "10px 12px",
+                    borderRadius: 4,
+                    fontSize: 13,
+                    fontFamily: "'Crimson Pro', serif",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => { onResolve(report._id, "resolved", note); setExpanded(false); }}
+                  style={{
+                    background: COLORS.green,
+                    color: COLORS.bg,
+                    border: "none",
+                    padding: "8px 16px",
+                    fontSize: 11,
+                    fontFamily: "'DM Mono', monospace",
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    fontWeight: 700,
+                    borderRadius: 4,
+                    cursor: "pointer",
+                  }}
+                >
+                  Resolve
+                </button>
+                <button
+                  onClick={() => { onResolve(report._id, "dismissed", note); setExpanded(false); }}
+                  style={{
+                    background: "transparent",
+                    color: COLORS.body,
+                    border: `1px solid ${COLORS.hairlineStrong}`,
+                    padding: "8px 16px",
+                    fontSize: 11,
+                    fontFamily: "'DM Mono', monospace",
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase",
+                    borderRadius: 4,
+                    cursor: "pointer",
+                  }}
+                >
+                  Dismiss
+                </button>
+                <button
+                  onClick={() => setExpanded(false)}
+                  style={{
+                    background: "transparent",
+                    color: COLORS.body,
+                    opacity: 0.6,
+                    border: "none",
+                    padding: "8px 12px",
+                    fontSize: 11,
+                    fontFamily: "'DM Mono', monospace",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// PROFILE EDITOR
 // ============================================================================
 
 function ProfileEditor({ expert, token, onSaved }) {

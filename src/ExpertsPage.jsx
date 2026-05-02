@@ -38,6 +38,7 @@ export default function ExpertsPage() {
   const [experts, setExperts] = useState([]);
   const [selectedExpert, setSelectedExpert] = useState(null);
   const [endorsements, setEndorsements] = useState([]);
+  const [articles, setArticles] = useState([]);
   const [filterType, setFilterType] = useState("all");
   
   useEffect(() => {
@@ -85,6 +86,14 @@ export default function ExpertsPage() {
       const data = await response.json();
       setSelectedExpert(data.expert);
       setEndorsements(data.endorsements || []);
+      // Fetch published articles for this expert
+      try {
+        const artRes = await fetch(`${API_URL}/articles?expert=${slug}&limit=20`);
+        const artData = await artRes.json();
+        setArticles(artData.articles || []);
+      } catch (e) {
+        setArticles([]);
+      }
       setView("detail");
     } catch (err) {
       console.error(err);
@@ -107,7 +116,7 @@ export default function ExpertsPage() {
           {view === "loading" && <LoadingState />}
           {view === "list" && <ExpertsListView experts={experts} filterType={filterType} setFilterType={setFilterType} />}
           {view === "detail" && selectedExpert && (
-            <ExpertDetailView expert={selectedExpert} endorsements={endorsements} />
+            <ExpertDetailView expert={selectedExpert} endorsements={endorsements} articles={articles} />
           )}
           {view === "not-found" && <NotFoundView />}
         </div>
@@ -425,7 +434,7 @@ function ExpertCard({ expert, featured }) {
   );
 }
 
-function ExpertDetailView({ expert, endorsements }) {
+function ExpertDetailView({ expert, endorsements, articles }) {
   const initials = expert.full_name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
   const typeInfo = EXPERT_TYPE_LABELS[expert.expert_type] || EXPERT_TYPE_LABELS.verifier;
   const tierInfo = TIER_BADGES[expert.tier] || TIER_BADGES.authority;
@@ -624,6 +633,102 @@ function ExpertDetailView({ expert, endorsements }) {
         </Section>
       )}
       
+      {/* Published Articles */}
+      {articles && articles.length > 0 && (
+        <Section title={`📝 Published Articles (${articles.length})`}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {articles.map(article => (
+              <a
+                key={article.id}
+                href={`#articles/${article.slug}`}
+                style={{
+                  background: COLORS.bg,
+                  border: `1px solid ${COLORS.hairline}`,
+                  borderRadius: 4,
+                  padding: 20,
+                  textDecoration: "none",
+                  display: "block",
+                  transition: "all 0.2s",
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.borderColor = COLORS.green;
+                  e.currentTarget.style.transform = "translateY(-1px)";
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = COLORS.hairline;
+                  e.currentTarget.style.transform = "translateY(0)";
+                }}
+              >
+                <h4 style={{
+                  fontFamily: "'Barlow Condensed', sans-serif",
+                  fontSize: 18,
+                  fontWeight: 900,
+                  color: "#F2F5EE",
+                  margin: "0 0 6px",
+                  lineHeight: 1.2,
+                }}>
+                  {article.title}
+                </h4>
+                {article.summary && (
+                  <p style={{
+                    color: COLORS.body,
+                    opacity: 0.7,
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    margin: "0 0 10px",
+                    display: "-webkit-box",
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical",
+                    overflow: "hidden",
+                  }}>
+                    {article.summary}
+                  </p>
+                )}
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  {article.tags && article.tags.length > 0 && (
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {article.tags.slice(0, 3).map((tag, i) => (
+                        <span key={i} style={{
+                          fontSize: 9,
+                          fontFamily: "'DM Mono', monospace",
+                          color: COLORS.teal,
+                          background: COLORS.teal + "10",
+                          border: `1px solid ${COLORS.teal}30`,
+                          padding: "2px 6px",
+                          borderRadius: 10,
+                          letterSpacing: "0.05em",
+                        }}>
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{
+                    fontSize: 10,
+                    fontFamily: "'DM Mono', monospace",
+                    color: COLORS.body,
+                    opacity: 0.4,
+                    letterSpacing: "0.1em",
+                  }}>
+                    {article.published_at && new Date(article.published_at).toLocaleDateString()}
+                    {article.views > 0 && ` · ${article.views} views`}
+                  </div>
+                  <div style={{
+                    marginLeft: "auto",
+                    fontSize: 10,
+                    fontFamily: "'DM Mono', monospace",
+                    color: COLORS.green,
+                    letterSpacing: "0.1em",
+                  }}>
+                    Read →
+                  </div>
+                </div>
+              </a>
+            ))}
+          </div>
+        </Section>
+      )}
+
       {/* Social Links */}
       {(expert.website || expert.social?.twitter || expert.social?.linkedin || expert.social?.youtube) && (
         <Section title="Connect">

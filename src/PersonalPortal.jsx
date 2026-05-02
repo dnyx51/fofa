@@ -1115,6 +1115,9 @@ function Dashboard({ user, token, onProfileUpdate, showToast }) {
 
   const tabs = [
     { id: "passport", label: "Passport" },
+    { id: "myclubs", label: "⚽ My Clubs" },
+    { id: "feed", label: "📡 Feed" },
+    { id: "badges", label: "🏅 Badges" },
     { id: "leaderboard", label: "🏆 Leaderboard" },
     { id: "referrals", label: "🎁 Refer Friends" },
     { id: "activities", label: "Record Activity" },
@@ -1161,7 +1164,16 @@ function Dashboard({ user, token, onProfileUpdate, showToast }) {
       {/* Tab content with fade */}
       <div key={activeTab} className="fade-in">
         {activeTab === "passport" && (
-          <PassportTab user={user} loyaltyData={loyaltyData} loading={loading} />
+          <PassportTab user={user} loyaltyData={loyaltyData} loading={loading} token={token} />
+        )}
+        {activeTab === "myclubs" && (
+          <MyClubsTab token={token} showToast={showToast} />
+        )}
+        {activeTab === "feed" && (
+          <ActivityFeedTab showToast={showToast} />
+        )}
+        {activeTab === "badges" && (
+          <BadgesTab token={token} showToast={showToast} />
         )}
         {activeTab === "leaderboard" && (
           <LeaderboardTab token={token} user={user} showToast={showToast} />
@@ -1191,7 +1203,17 @@ function Dashboard({ user, token, onProfileUpdate, showToast }) {
 // PASSPORT TAB
 // ============================================================================
 
-function PassportTab({ user, loyaltyData, loading }) {
+function PassportTab({ user, loyaltyData, loading, token }) {
+  const [passportData, setPassportData] = useState(null);
+
+  useEffect(() => {
+    if (token) {
+      fetch(`${API_URL}/user/passport`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(d => setPassportData(d.passport))
+        .catch(() => {});
+    }
+  }, [token]);
   if (loading || !loyaltyData) {
     return <PassportSkeleton />;
   }
@@ -1470,6 +1492,91 @@ function PassportTab({ user, loyaltyData, loading }) {
             ))}
           </div>
         </div>
+
+        {/* Quick Stats Row */}
+        {passportData && (
+          <div style={{ padding: "0 32px 24px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+            {[
+              { label: "RANK", value: `#${passportData.rank}`, color: COLORS.gold },
+              { label: "CLUBS", value: passportData.stats.following_count, color: COLORS.teal },
+              { label: "BADGES", value: passportData.stats.badge_count, color: COLORS.green },
+              { label: "REFERRALS", value: passportData.stats.referral_count, color: COLORS.gold },
+            ].map((s, i) => (
+              <div key={i} style={{
+                background: COLORS.bg,
+                border: `1px solid ${COLORS.hairline}`,
+                borderRadius: 4,
+                padding: "12px 10px",
+                textAlign: "center",
+              }}>
+                <div style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", opacity: 0.5, letterSpacing: "0.15em", marginBottom: 4 }}>{s.label}</div>
+                <div style={{ fontSize: 22, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, color: s.color }}>{s.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Badges Preview */}
+        {passportData && passportData.badges && passportData.badges.length > 0 && (
+          <div style={{ padding: "0 32px 24px" }}>
+            <div style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.6, letterSpacing: "0.2em", marginBottom: 12 }}>
+              BADGES EARNED
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {passportData.badges.map((b, i) => (
+                <div key={i} style={{
+                  background: COLORS.bgCard,
+                  border: `1px solid ${COLORS.hairline}`,
+                  borderRadius: 4,
+                  padding: "8px 14px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 12,
+                  fontFamily: "'DM Mono', monospace",
+                  color: COLORS.body,
+                }}>
+                  <span style={{ fontSize: 18 }}>{b.icon}</span>
+                  <span>{b.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Following Clubs Preview */}
+        {passportData && passportData.following_clubs && passportData.following_clubs.length > 0 && (
+          <div style={{ padding: "0 32px 24px" }}>
+            <div style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.6, letterSpacing: "0.2em", marginBottom: 12 }}>
+              FOLLOWING
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {passportData.following_clubs.map((c, i) => (
+                <a key={i} href={`#clubs/${c.slug}`} style={{
+                  background: COLORS.bgCard,
+                  border: `1px solid ${COLORS.hairline}`,
+                  borderRadius: 4,
+                  padding: "8px 14px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 12,
+                  fontFamily: "'DM Mono', monospace",
+                  color: COLORS.teal,
+                  textDecoration: "none",
+                  transition: "border-color 0.2s",
+                }}
+                onMouseEnter={e => e.currentTarget.style.borderColor = COLORS.teal}
+                onMouseLeave={e => e.currentTarget.style.borderColor = COLORS.hairline}
+                >
+                  <span>🏟️</span>
+                  <span>{c.name}</span>
+                  <span style={{ fontSize: 10, color: COLORS.body, opacity: 0.5 }}>{c.country}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Footer strip */}
         <div style={{
@@ -2997,6 +3104,543 @@ function OnboardingCard({ icon, subtitle, title, description, highlight, customC
           Skip
         </button>
       </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// REFERRALS TAB
+// ============================================================================
+
+// ============================================================================
+// MY CLUBS TAB
+// ============================================================================
+
+function MyClubsTab({ token, showToast }) {
+  const [followingClubs, setFollowingClubs] = useState([]);
+  const [allClubs, setAllClubs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showDiscover, setShowDiscover] = useState(false);
+  const [actionLoading, setActionLoading] = useState(null);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  async function fetchData() {
+    setLoading(true);
+    try {
+      const [followRes, allRes] = await Promise.all([
+        fetch(`${API_URL}/user/following`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/clubs`),
+      ]);
+      const followData = await followRes.json();
+      const allData = await allRes.json();
+      setFollowingClubs(followData.clubs || []);
+      setAllClubs(allData.clubs || []);
+    } catch (err) {
+      showToast("Could not load clubs", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleFollow(club) {
+    setActionLoading(club.slug);
+    try {
+      const res = await fetch(`${API_URL}/clubs/${club.slug}/follow`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.error || "Failed");
+      }
+      showToast(`Now following ${club.name}`, "success");
+      await fetchData();
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleUnfollow(club) {
+    setActionLoading(club.slug);
+    try {
+      const res = await fetch(`${API_URL}/clubs/${club.slug}/follow`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Failed to unfollow");
+      showToast(`Unfollowed ${club.name}`, "success");
+      await fetchData();
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  const followingSlugs = new Set(followingClubs.map(c => c.slug));
+  const discoverClubs = allClubs
+    .filter(c => !followingSlugs.has(c.slug))
+    .filter(c => !searchQuery || c.name.toLowerCase().includes(searchQuery.toLowerCase()) || (c.country || "").toLowerCase().includes(searchQuery.toLowerCase()));
+
+  if (loading) {
+    return <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>{[1,2,3].map(i => <Skeleton key={i} height={100} />)}</div>;
+  }
+
+  return (
+    <div style={{ maxWidth: 900 }}>
+      {/* Header */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.gold, letterSpacing: "0.25em", marginBottom: 12 }}>
+          — YOUR CLUBS
+        </div>
+        <h2 style={{ color: "#F2F5EE", fontFamily: "'Barlow Condensed', sans-serif", fontSize: "clamp(28px, 5vw, 40px)", fontWeight: 900, margin: "0 0 8px", letterSpacing: "-0.01em" }}>
+          Clubs You Follow
+        </h2>
+        <p style={{ color: COLORS.body, opacity: 0.7, margin: 0 }}>
+          Follow clubs to show your support and stay connected with their journey on FOFA.
+        </p>
+      </div>
+
+      {/* Following clubs */}
+      {followingClubs.length === 0 ? (
+        <div style={{
+          background: COLORS.bgCard,
+          border: `1px solid ${COLORS.hairline}`,
+          borderRadius: 8,
+          padding: "48px 32px",
+          textAlign: "center",
+          marginBottom: 32,
+        }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>⚽</div>
+          <div style={{ color: "#F2F5EE", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, fontWeight: 900, marginBottom: 8 }}>
+            No Clubs Yet
+          </div>
+          <p style={{ color: COLORS.body, opacity: 0.7, marginBottom: 24 }}>
+            Discover clubs on FOFA and follow the ones you support.
+          </p>
+          <button className="btn-primary" onClick={() => setShowDiscover(true)}>
+            Discover Clubs
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16, marginBottom: 32 }}>
+          {followingClubs.map(club => (
+            <div key={club.slug} style={{
+              background: COLORS.bgCard,
+              border: `1px solid ${COLORS.hairline}`,
+              borderRadius: 8,
+              padding: 24,
+              transition: "all 0.2s",
+              position: "relative",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = COLORS.teal; e.currentTarget.style.transform = "translateY(-2px)"; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = COLORS.hairline; e.currentTarget.style.transform = "translateY(0)"; }}
+            >
+              <a href={`#clubs/${club.slug}`} style={{ textDecoration: "none", color: "inherit" }}>
+                <div style={{ fontSize: 20, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, color: "#F2F5EE", marginBottom: 8 }}>
+                  {club.name}
+                </div>
+                <div style={{ fontSize: 12, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.6, marginBottom: 4 }}>
+                  {club.league}{club.country ? ` · ${club.country}` : ""}
+                </div>
+                {club.stadium && (
+                  <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.4 }}>
+                    🏟️ {club.stadium}
+                  </div>
+                )}
+                <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.teal, marginTop: 8 }}>
+                  {club.fan_count || 0} fans on FOFA
+                </div>
+              </a>
+              <button
+                onClick={(e) => { e.preventDefault(); handleUnfollow(club); }}
+                disabled={actionLoading === club.slug}
+                style={{
+                  position: "absolute",
+                  top: 16,
+                  right: 16,
+                  background: "transparent",
+                  border: `1px solid ${COLORS.red}40`,
+                  color: COLORS.red,
+                  padding: "4px 12px",
+                  borderRadius: 4,
+                  fontSize: 10,
+                  fontFamily: "'DM Mono', monospace",
+                  cursor: "pointer",
+                  opacity: actionLoading === club.slug ? 0.5 : 0.7,
+                  transition: "all 0.2s",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.background = COLORS.red + "20"; }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = "0.7"; e.currentTarget.style.background = "transparent"; }}
+              >
+                {actionLoading === club.slug ? "..." : "Unfollow"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Discover toggle */}
+      <button
+        className="btn-ghost"
+        onClick={() => setShowDiscover(!showDiscover)}
+        style={{ marginBottom: 24 }}
+      >
+        {showDiscover ? "Hide Discover" : "Discover More Clubs"}
+      </button>
+
+      {/* Discover section */}
+      {showDiscover && (
+        <div>
+          <input
+            type="text"
+            placeholder="Search clubs by name or country..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "12px 16px",
+              background: COLORS.bgCard,
+              border: `1px solid ${COLORS.hairline}`,
+              borderRadius: 4,
+              color: "#F2F5EE",
+              fontFamily: "'Crimson Pro', serif",
+              fontSize: 16,
+              marginBottom: 16,
+              outline: "none",
+            }}
+            onFocus={e => e.target.style.borderColor = COLORS.green}
+            onBlur={e => e.target.style.borderColor = COLORS.hairline}
+          />
+          {discoverClubs.length === 0 ? (
+            <div style={{ color: COLORS.body, opacity: 0.5, padding: 24, textAlign: "center" }}>
+              {searchQuery ? "No clubs match your search." : "You're following all clubs!"}
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+              {discoverClubs.map(club => (
+                <div key={club.slug} style={{
+                  background: COLORS.bgCard,
+                  border: `1px solid ${COLORS.hairline}`,
+                  borderRadius: 8,
+                  padding: "16px 20px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 16,
+                }}>
+                  <a href={`#clubs/${club.slug}`} style={{ textDecoration: "none", color: "inherit", flex: 1 }}>
+                    <div style={{ fontSize: 16, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, color: "#F2F5EE" }}>
+                      {club.name}
+                    </div>
+                    <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.5 }}>
+                      {club.league}{club.country ? ` · ${club.country}` : ""}
+                    </div>
+                  </a>
+                  <button
+                    onClick={() => handleFollow(club)}
+                    disabled={actionLoading === club.slug}
+                    className="btn-primary"
+                    style={{ padding: "6px 16px", fontSize: 11, whiteSpace: "nowrap" }}
+                  >
+                    {actionLoading === club.slug ? "..." : "Follow"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// ACTIVITY FEED TAB
+// ============================================================================
+
+function ActivityFeedTab({ showToast }) {
+  const [feed, setFeed] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextBefore, setNextBefore] = useState(null);
+
+  useEffect(() => {
+    fetchFeed();
+  }, []);
+
+  async function fetchFeed(before = null) {
+    if (before) setLoadingMore(true); else setLoading(true);
+    try {
+      let url = `${API_URL}/feed?limit=20`;
+      if (before) url += `&before=${encodeURIComponent(before)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (before) {
+        setFeed(prev => [...prev, ...(data.feed || [])]);
+      } else {
+        setFeed(data.feed || []);
+      }
+      setHasMore(data.has_more);
+      setNextBefore(data.next_before);
+    } catch (err) {
+      showToast("Could not load feed", "error");
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }
+
+  function formatTimeAgo(ts) {
+    const diff = Date.now() - new Date(ts).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 7) return `${days}d ago`;
+    return new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  }
+
+  const typeColors = {
+    activity: COLORS.green,
+    endorsement: COLORS.gold,
+    article: COLORS.teal,
+    club_joined: COLORS.green,
+  };
+
+  if (loading) {
+    return <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>{[1,2,3,4,5].map(i => <Skeleton key={i} height={70} />)}</div>;
+  }
+
+  return (
+    <div style={{ maxWidth: 800 }}>
+      {/* Header */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.gold, letterSpacing: "0.25em", marginBottom: 12 }}>
+          — PLATFORM ACTIVITY
+        </div>
+        <h2 style={{ color: "#F2F5EE", fontFamily: "'Barlow Condensed', sans-serif", fontSize: "clamp(28px, 5vw, 40px)", fontWeight: 900, margin: "0 0 8px", letterSpacing: "-0.01em" }}>
+          Activity Feed
+        </h2>
+        <p style={{ color: COLORS.body, opacity: 0.7, margin: 0 }}>
+          What's happening across FOFA right now.
+        </p>
+      </div>
+
+      {feed.length === 0 ? (
+        <div style={{
+          background: COLORS.bgCard,
+          border: `1px solid ${COLORS.hairline}`,
+          borderRadius: 8,
+          padding: "48px 32px",
+          textAlign: "center",
+        }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>📡</div>
+          <div style={{ color: "#F2F5EE", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, fontWeight: 900 }}>
+            No Activity Yet
+          </div>
+          <p style={{ color: COLORS.body, opacity: 0.7 }}>
+            The feed will light up as fans, clubs, and experts start using FOFA.
+          </p>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {feed.map((item, i) => (
+            <div key={i} style={{
+              background: COLORS.bgCard,
+              border: `1px solid ${COLORS.hairline}`,
+              borderRadius: 6,
+              padding: "16px 20px",
+              display: "flex",
+              gap: 16,
+              alignItems: "flex-start",
+              animation: `fadeIn 0.3s ease-out ${Math.min(i * 0.05, 0.5)}s forwards`,
+              opacity: 0,
+              transition: "border-color 0.2s",
+            }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = typeColors[item.type] || COLORS.hairline}
+            onMouseLeave={e => e.currentTarget.style.borderColor = COLORS.hairline}
+            >
+              <div style={{ fontSize: 24, flexShrink: 0, width: 36, textAlign: "center" }}>
+                {item.icon}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontFamily: "'Crimson Pro', serif", color: "#F2F5EE", marginBottom: 4 }}>
+                  {item.title}
+                </div>
+                {item.subtitle && (
+                  <div style={{ fontSize: 13, color: COLORS.body, opacity: 0.6, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {item.subtitle}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.4, letterSpacing: "0.1em" }}>
+                    {formatTimeAgo(item.timestamp)}
+                  </span>
+                  {item.points && (
+                    <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: COLORS.green, letterSpacing: "0.1em" }}>
+                      +{item.points} pts
+                    </span>
+                  )}
+                  {item.tags && item.tags.length > 0 && item.tags.slice(0, 3).map((tag, ti) => (
+                    <span key={ti} style={{ fontSize: 9, fontFamily: "'DM Mono', monospace", color: COLORS.teal, background: COLORS.teal + "15", padding: "2px 8px", borderRadius: 3 }}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: typeColors[item.type] || COLORS.body, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.1em", flexShrink: 0 }}>
+                {item.type.replace("_", " ")}
+              </div>
+            </div>
+          ))}
+
+          {/* Load more */}
+          {hasMore && (
+            <div style={{ textAlign: "center", paddingTop: 16 }}>
+              <button
+                className="btn-ghost"
+                onClick={() => fetchFeed(nextBefore)}
+                disabled={loadingMore}
+              >
+                {loadingMore ? "Loading..." : "Load More"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// BADGES TAB
+// ============================================================================
+
+function BadgesTab({ token, showToast }) {
+  const [badges, setBadges] = useState([]);
+  const [available, setAvailable] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchBadges();
+  }, []);
+
+  async function fetchBadges() {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/user/badges`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setBadges(data.badges || []);
+      setAvailable(data.available_badges || []);
+    } catch (err) {
+      showToast("Could not load badges", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const earnedIds = new Set(badges.map(b => b.badge_id));
+  const categories = ["activity", "clubs", "community", "level"];
+  const categoryLabels = { activity: "Activity", clubs: "Clubs", community: "Community", level: "Level Milestones" };
+  const categoryIcons = { activity: "⚡", clubs: "⚽", community: "🤝", level: "⭐" };
+
+  if (loading) {
+    return <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>{[1,2,3].map(i => <Skeleton key={i} height={120} />)}</div>;
+  }
+
+  return (
+    <div style={{ maxWidth: 900 }}>
+      {/* Header */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.gold, letterSpacing: "0.25em", marginBottom: 12 }}>
+          — ACHIEVEMENTS
+        </div>
+        <h2 style={{ color: "#F2F5EE", fontFamily: "'Barlow Condensed', sans-serif", fontSize: "clamp(28px, 5vw, 40px)", fontWeight: 900, margin: "0 0 8px", letterSpacing: "-0.01em" }}>
+          Your Badges
+        </h2>
+        <p style={{ color: COLORS.body, opacity: 0.7, margin: 0 }}>
+          Earn badges by being active on FOFA. <strong style={{ color: COLORS.green }}>{badges.length}</strong> of <strong>{available.length}</strong> earned.
+        </p>
+      </div>
+
+      {/* Progress bar */}
+      <div style={{ marginBottom: 40 }}>
+        <div style={{ height: 8, background: COLORS.bgCard, borderRadius: 4, overflow: "hidden", border: `1px solid ${COLORS.hairline}` }}>
+          <div style={{
+            height: "100%",
+            width: `${available.length > 0 ? (badges.length / available.length) * 100 : 0}%`,
+            background: `linear-gradient(90deg, ${COLORS.green}, ${COLORS.gold})`,
+            transition: "width 1s ease-out",
+            boxShadow: `0 0 12px ${COLORS.green}`,
+          }} />
+        </div>
+      </div>
+
+      {/* Badge categories */}
+      {categories.map(cat => {
+        const catBadges = available.filter(b => b.category === cat);
+        if (catBadges.length === 0) return null;
+        return (
+          <div key={cat} style={{ marginBottom: 40 }}>
+            <div style={{ fontSize: 12, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.6, letterSpacing: "0.2em", marginBottom: 16, textTransform: "uppercase" }}>
+              {categoryIcons[cat]} {categoryLabels[cat]}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
+              {catBadges.map(def => {
+                const earned = earnedIds.has(def.badge_id);
+                const earnedBadge = badges.find(b => b.badge_id === def.badge_id);
+                return (
+                  <div key={def.badge_id} style={{
+                    background: earned ? COLORS.bgCard : COLORS.bg,
+                    border: `1px solid ${earned ? COLORS.green + "40" : COLORS.hairline}`,
+                    borderRadius: 8,
+                    padding: 20,
+                    textAlign: "center",
+                    opacity: earned ? 1 : 0.4,
+                    transition: "all 0.3s",
+                    position: "relative",
+                  }}
+                  onMouseEnter={e => { if (earned) { e.currentTarget.style.borderColor = COLORS.green; e.currentTarget.style.transform = "translateY(-3px)"; }}}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = earned ? COLORS.green + "40" : COLORS.hairline; e.currentTarget.style.transform = "translateY(0)"; }}
+                  >
+                    {earned && (
+                      <div style={{ position: "absolute", top: 8, right: 10, fontSize: 10, color: COLORS.green, fontFamily: "'DM Mono', monospace" }}>
+                        ✓
+                      </div>
+                    )}
+                    <div style={{ fontSize: 36, marginBottom: 12, filter: earned ? "none" : "grayscale(1)" }}>
+                      {def.icon}
+                    </div>
+                    <div style={{ fontSize: 14, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, color: earned ? "#F2F5EE" : COLORS.body, marginBottom: 4 }}>
+                      {def.name}
+                    </div>
+                    <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.6 }}>
+                      {def.description}
+                    </div>
+                    {earned && earnedBadge && (
+                      <div style={{ fontSize: 9, fontFamily: "'DM Mono', monospace", color: COLORS.green, opacity: 0.6, marginTop: 8, letterSpacing: "0.1em" }}>
+                        EARNED {new Date(earnedBadge.earned_at).toLocaleDateString("en-GB")}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -9,9 +9,6 @@ import ClubsPage from './ClubsPage.jsx'
 import ExpertsPage from './ExpertsPage.jsx'
 import ExpertApplyForm from './ExpertApplyForm.jsx'
 import ExpertDashboard from './ExpertDashboard.jsx'
-import ClubDashboard from './ClubDashboard.jsx'
-import FanProfile from './FanProfile.jsx'
-import SearchPage from './SearchPage.jsx'
 
 function App() {
   const [currentView, setCurrentView] = useState('site')
@@ -19,7 +16,7 @@ function App() {
   useEffect(() => {
     const updateView = () => {
       const hash = window.location.hash
-
+      
       // Routes - more specific first
       if (hash === '#expert/dashboard') {
         setCurrentView('expert-dashboard')
@@ -29,14 +26,8 @@ function App() {
         setCurrentView('experts')
       } else if (hash === '#clubs/apply' || hash === '#apply') {
         setCurrentView('clubs-apply')
-      } else if (hash === '#club/dashboard') {
-        setCurrentView('club-dashboard')
       } else if (hash === '#clubs' || hash.match(/^#clubs\/[a-z0-9-]+$/)) {
         setCurrentView('clubs')
-      } else if (hash.match(/^#fans\/[a-z0-9_-]+$/)) {
-        setCurrentView('fan-profile')
-      } else if (hash === '#search' || hash.startsWith('#search?')) {
-        setCurrentView('search')
       } else if (hash.startsWith('#join')) {
         setCurrentView('portal')
       } else if (hash === '#portal' || hash.startsWith('#portal?')) {
@@ -66,9 +57,6 @@ function App() {
       {currentView === 'experts' && <ExpertsPage />}
       {currentView === 'experts-apply' && <ExpertApplyForm />}
       {currentView === 'expert-dashboard' && <ExpertDashboard />}
-      {currentView === 'club-dashboard' && <ClubDashboard />}
-      {currentView === 'fan-profile' && <FanProfile />}
-      {currentView === 'search' && <SearchPage />}
     </>
   )
 }

@@ -37,7 +37,7 @@ async function connectDB() {
 
 const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-  password: { type: String, required: true },
+  password: { type: String, required: false, default: null }, // null for social-only users
   username: { type: String, required: true, unique: true, lowercase: true, trim: true },
   display_name: { type: String, required: true },
   favorite_club: { type: String, default: "" },
@@ -51,23 +51,15 @@ const userSchema = new mongoose.Schema({
   community_score: { type: Number, default: 0 },
   growth_score: { type: Number, default: 0 },
   level: { type: String, default: "apprentice" },
-  // Club following
-  following_clubs: { type: [mongoose.Schema.Types.ObjectId], ref: "Club", default: [], index: true },
-  // Achievement badges
-  badges: {
-    type: [{
-      badge_id: String,
-      name: String,
-      description: String,
-      icon: String,
-      earned_at: { type: Date, default: Date.now },
-    }],
-    default: [],
-  },
   // Referral system
   referral_code: { type: String, unique: true, sparse: true, index: true },
   referred_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   referral_count: { type: Number, default: 0, index: true },
+  // Social auth
+  google_id: { type: String, unique: true, sparse: true, index: true },
+  twitter_id: { type: String, unique: true, sparse: true, index: true },
+  auth_providers: { type: [String], default: ["email"] }, // ['email', 'google', 'twitter']
+  needs_username: { type: Boolean, default: false }, // true for new social users
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now },
 });
@@ -378,259 +370,6 @@ const Club = mongoose.models.Club || mongoose.model("Club", clubSchema);
 const ExpertApplication = mongoose.models.ExpertApplication || mongoose.model("ExpertApplication", expertApplicationSchema);
 const Expert = mongoose.models.Expert || mongoose.model("Expert", expertSchema);
 const Endorsement = mongoose.models.Endorsement || mongoose.model("Endorsement", endorsementSchema);
-
-// ============================================================================
-// ARTICLE SCHEMA (Voice publishing - experts write content)
-// ============================================================================
-
-const articleSchema = new mongoose.Schema({
-  expert_id: { type: mongoose.Schema.Types.ObjectId, ref: "Expert", required: true, index: true },
-
-  title: { type: String, required: true },
-  slug: { type: String, required: true, unique: true, lowercase: true, index: true },
-  content: { type: String, required: true },
-  summary: { type: String, default: "" },
-  tags: { type: [String], default: [] },
-
-  // Linked clubs (optional)
-  club_ids: [{ type: mongoose.Schema.Types.ObjectId, ref: "Club" }],
-
-  status: {
-    type: String,
-    enum: ["draft", "published"],
-    default: "draft",
-    index: true,
-  },
-
-  views: { type: Number, default: 0 },
-  published_at: { type: Date, default: null },
-  created_at: { type: Date, default: Date.now },
-  updated_at: { type: Date, default: Date.now },
-});
-
-const Article = mongoose.models.Article || mongoose.model("Article", articleSchema);
-
-// ============================================================================
-// REPORT SCHEMA (Ambassador moderation - community reporting)
-// ============================================================================
-
-const reportSchema = new mongoose.Schema({
-  reporter_expert_id: { type: mongoose.Schema.Types.ObjectId, ref: "Expert", required: true, index: true },
-
-  target_type: {
-    type: String,
-    enum: ["activity", "user", "endorsement", "article", "club"],
-    required: true,
-  },
-  target_id: { type: String, required: true },
-  target_name: { type: String, default: "" }, // Display name for reference
-
-  reason: { type: String, required: true },
-  details: { type: String, default: "" },
-
-  status: {
-    type: String,
-    enum: ["pending", "reviewing", "resolved", "dismissed"],
-    default: "pending",
-    index: true,
-  },
-
-  resolved_by: { type: String, default: null }, // Admin email
-  resolution_note: { type: String, default: "" },
-  resolved_at: { type: Date, default: null },
-
-  created_at: { type: Date, default: Date.now, index: true },
-});
-
-const Report = mongoose.models.Report || mongoose.model("Report", reportSchema);
-
-// ============================================================================
-// ANNOUNCEMENT SCHEMA (club announcements)
-// ============================================================================
-
-const announcementSchema = new mongoose.Schema({
-  club_id: { type: mongoose.Schema.Types.ObjectId, ref: "Club", required: true, index: true },
-  author_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-  title: { type: String, required: true, trim: true },
-  content: { type: String, required: true },
-  pinned: { type: Boolean, default: false },
-  created_at: { type: Date, default: Date.now, index: true },
-  updated_at: { type: Date, default: Date.now },
-});
-
-const Announcement = mongoose.models.Announcement || mongoose.model("Announcement", announcementSchema);
-
-// ============================================================================
-// NOTIFICATION SCHEMA
-// ============================================================================
-
-const notificationSchema = new mongoose.Schema({
-  user_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
-  type: {
-    type: String,
-    required: true,
-    enum: ["new_follower", "endorsement", "badge_earned", "article_published", "club_approved", "announcement", "referral_joined", "level_up"],
-  },
-  title: { type: String, required: true },
-  message: { type: String, default: "" },
-  link: { type: String, default: "" },
-  read: { type: Boolean, default: false, index: true },
-  created_at: { type: Date, default: Date.now, index: true },
-});
-
-const Notification = mongoose.models.Notification || mongoose.model("Notification", notificationSchema);
-
-// Helper to create a notification
-async function createNotification(userId, type, title, message = "", link = "") {
-  try {
-    await Notification.create({ user_id: userId, type, title, message, link });
-  } catch (err) {
-    console.error("Notification create error:", err.message);
-  }
-}
-
-// Helper to notify all followers of a club
-async function notifyClubFollowers(clubId, type, title, message = "", link = "") {
-  try {
-    const followers = await User.find({ following_clubs: clubId }).select("_id");
-    const notifications = followers.map(f => ({
-      user_id: f._id,
-      type,
-      title,
-      message,
-      link,
-    }));
-    if (notifications.length > 0) {
-      await Notification.insertMany(notifications);
-    }
-  } catch (err) {
-    console.error("Bulk notification error:", err.message);
-  }
-}
-
-// ============================================================================
-// BADGE DEFINITIONS & HELPERS
-// ============================================================================
-
-const BADGE_DEFINITIONS = [
-  { badge_id: "first_activity", name: "First Steps", description: "Logged your first activity", icon: "🌱", category: "activity" },
-  { badge_id: "five_activities", name: "Getting Started", description: "Logged 5 activities", icon: "🔥", category: "activity" },
-  { badge_id: "twenty_activities", name: "Dedicated Fan", description: "Logged 20 activities", icon: "💪", category: "activity" },
-  { badge_id: "fifty_activities", name: "Die-Hard", description: "Logged 50 activities", icon: "🏆", category: "activity" },
-  { badge_id: "first_follow", name: "First Follow", description: "Followed your first club", icon: "⚽", category: "clubs" },
-  { badge_id: "three_follows", name: "Club Explorer", description: "Following 3 clubs", icon: "🧭", category: "clubs" },
-  { badge_id: "ten_follows", name: "Scout", description: "Following 10 clubs", icon: "🌍", category: "clubs" },
-  { badge_id: "first_referral", name: "Recruiter", description: "Referred your first fan", icon: "🤝", category: "community" },
-  { badge_id: "five_referrals", name: "Ambassador", description: "Referred 5 fans", icon: "📢", category: "community" },
-  { badge_id: "supporter_level", name: "Supporter", description: "Reached Supporter level (100 pts)", icon: "⭐", category: "level" },
-  { badge_id: "devotee_level", name: "Devotee", description: "Reached Devotee level (500 pts)", icon: "🌟", category: "level" },
-  { badge_id: "veteran_level", name: "Veteran", description: "Reached Veteran level (1500 pts)", icon: "🎖️", category: "level" },
-  { badge_id: "legend_level", name: "Legend", description: "Reached Legend level (5000 pts)", icon: "👑", category: "level" },
-  { badge_id: "match_day", name: "Match Day", description: "Attended your first match", icon: "🏟️", category: "activity" },
-  { badge_id: "merch_buyer", name: "True Colours", description: "Bought club merchandise", icon: "👕", category: "activity" },
-  { badge_id: "social_sharer", name: "Megaphone", description: "Shared on social media", icon: "📱", category: "activity" },
-  { badge_id: "volunteer", name: "Community Hero", description: "Volunteered for a club", icon: "💚", category: "activity" },
-];
-
-async function computeEarnedBadges(userId) {
-  const user = await User.findById(userId);
-  if (!user) return [];
-
-  const existing = (user.badges || []).map(b => b.badge_id);
-  const newBadges = [];
-
-  // Activity count badges
-  const activityCount = await Activity.countDocuments({ user_id: userId });
-  if (activityCount >= 1 && !existing.includes("first_activity")) {
-    newBadges.push(makeBadge("first_activity"));
-  }
-  if (activityCount >= 5 && !existing.includes("five_activities")) {
-    newBadges.push(makeBadge("five_activities"));
-  }
-  if (activityCount >= 20 && !existing.includes("twenty_activities")) {
-    newBadges.push(makeBadge("twenty_activities"));
-  }
-  if (activityCount >= 50 && !existing.includes("fifty_activities")) {
-    newBadges.push(makeBadge("fifty_activities"));
-  }
-
-  // Club following badges
-  const followCount = (user.following_clubs || []).length;
-  if (followCount >= 1 && !existing.includes("first_follow")) {
-    newBadges.push(makeBadge("first_follow"));
-  }
-  if (followCount >= 3 && !existing.includes("three_follows")) {
-    newBadges.push(makeBadge("three_follows"));
-  }
-  if (followCount >= 10 && !existing.includes("ten_follows")) {
-    newBadges.push(makeBadge("ten_follows"));
-  }
-
-  // Referral badges
-  const referralCount = await User.countDocuments({ referred_by: userId });
-  if (referralCount >= 1 && !existing.includes("first_referral")) {
-    newBadges.push(makeBadge("first_referral"));
-  }
-  if (referralCount >= 5 && !existing.includes("five_referrals")) {
-    newBadges.push(makeBadge("five_referrals"));
-  }
-
-  // Level badges
-  const score = user.total_score || 0;
-  if (score >= 100 && !existing.includes("supporter_level")) {
-    newBadges.push(makeBadge("supporter_level"));
-  }
-  if (score >= 500 && !existing.includes("devotee_level")) {
-    newBadges.push(makeBadge("devotee_level"));
-  }
-  if (score >= 1500 && !existing.includes("veteran_level")) {
-    newBadges.push(makeBadge("veteran_level"));
-  }
-  if (score >= 5000 && !existing.includes("legend_level")) {
-    newBadges.push(makeBadge("legend_level"));
-  }
-
-  // Activity type badges
-  const hasMatch = await Activity.findOne({ user_id: userId, activity_type: "match_attendance" });
-  if (hasMatch && !existing.includes("match_day")) {
-    newBadges.push(makeBadge("match_day"));
-  }
-  const hasMerch = await Activity.findOne({ user_id: userId, activity_type: "merch_purchase" });
-  if (hasMerch && !existing.includes("merch_buyer")) {
-    newBadges.push(makeBadge("merch_buyer"));
-  }
-  const hasSocial = await Activity.findOne({ user_id: userId, activity_type: "social_engagement" });
-  if (hasSocial && !existing.includes("social_sharer")) {
-    newBadges.push(makeBadge("social_sharer"));
-  }
-  const hasVolunteer = await Activity.findOne({ user_id: userId, activity_type: "volunteering" });
-  if (hasVolunteer && !existing.includes("volunteer")) {
-    newBadges.push(makeBadge("volunteer"));
-  }
-
-  return newBadges;
-}
-
-function makeBadge(badgeId) {
-  const def = BADGE_DEFINITIONS.find(b => b.badge_id === badgeId);
-  if (!def) return null;
-  return {
-    badge_id: def.badge_id,
-    name: def.name,
-    description: def.description,
-    icon: def.icon,
-    earned_at: new Date(),
-  };
-}
-
-async function checkAndAwardBadge(user, badgeId, name, description, icon) {
-  const existing = (user.badges || []).find(b => b.badge_id === badgeId);
-  if (existing) return false;
-  user.badges = user.badges || [];
-  user.badges.push({ badge_id: badgeId, name, description, icon, earned_at: new Date() });
-  await user.save();
-  return true;
-}
 
 function calculateLevel(totalScore) {
   if (totalScore >= 5000) return "legend";
@@ -946,6 +685,9 @@ function userToPublic(user) {
     bio: user.bio, profile_pic: user.profile_pic, created_at: user.created_at,
     referral_code: user.referral_code,
     referral_count: user.referral_count || 0,
+    auth_providers: user.auth_providers || ["email"],
+    needs_username: user.needs_username || false,
+    has_password: !!user.password,
   };
 }
 
@@ -1237,6 +979,375 @@ export default async function handler(req, res) {
       });
     }
 
+    // ============ SOCIAL AUTH ENDPOINTS ============
+
+    // ── GOOGLE ──────────────────────────────────────────────────────────────
+
+    // Step 1: Redirect user to Google
+    if (pathname.endsWith("/auth/google") && req.method === "GET") {
+      const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+      if (!GOOGLE_CLIENT_ID) {
+        return res.status(500).json({ error: "Google OAuth not configured" });
+      }
+
+      // Generate CSRF state token
+      const state = Buffer.from(JSON.stringify({
+        ts: Date.now(),
+        rand: Math.random().toString(36).slice(2),
+      })).toString("base64url");
+
+      const params = new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        redirect_uri: `${process.env.PUBLIC_URL || "https://fofa.lol"}/api/auth/google/callback`,
+        response_type: "code",
+        scope: "openid email profile",
+        state,
+        access_type: "offline",
+        prompt: "select_account",
+      });
+
+      return res.redirect(302, `https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+    }
+
+    // Step 2: Handle Google callback
+    if (pathname.endsWith("/auth/google/callback") && req.method === "GET") {
+      const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+      const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+      const BASE_URL = process.env.PUBLIC_URL || "https://fofa.lol";
+
+      const queryString = url.includes("?") ? url.split("?")[1] : "";
+      const params = new URLSearchParams(queryString);
+      const code = params.get("code");
+      const error = params.get("error");
+
+      if (error || !code) {
+        return res.redirect(302, `${BASE_URL}/#portal?error=google_cancelled`);
+      }
+
+      try {
+        // Exchange code for tokens
+        const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            code,
+            client_id: GOOGLE_CLIENT_ID,
+            client_secret: GOOGLE_CLIENT_SECRET,
+            redirect_uri: `${BASE_URL}/api/auth/google/callback`,
+            grant_type: "authorization_code",
+          }),
+        });
+
+        if (!tokenResponse.ok) {
+          throw new Error("Failed to exchange code for token");
+        }
+
+        const tokenData = await tokenResponse.json();
+
+        // Get user info from Google
+        const userInfoResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+          headers: { Authorization: `Bearer ${tokenData.access_token}` },
+        });
+
+        if (!userInfoResponse.ok) {
+          throw new Error("Failed to fetch Google user info");
+        }
+
+        const googleUser = await userInfoResponse.json();
+        // googleUser = { id, email, name, picture, given_name, family_name }
+
+        // Check if user exists by google_id first
+        let user = await User.findOne({ google_id: googleUser.id });
+
+        if (!user) {
+          // Check if email already exists (linking accounts)
+          user = await User.findOne({ email: googleUser.email.toLowerCase() });
+
+          if (user) {
+            // Link Google to existing account
+            user.google_id = googleUser.id;
+            if (!user.auth_providers.includes("google")) {
+              user.auth_providers.push("google");
+            }
+            // Update profile pic if they don't have one
+            if (!user.profile_pic && googleUser.picture) {
+              user.profile_pic = googleUser.picture;
+            }
+            user.updated_at = new Date();
+            await user.save();
+          } else {
+            // Brand new user - create account
+            // Generate temp username from Google name
+            const baseName = (googleUser.given_name || googleUser.name || "fan")
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, "")
+              .slice(0, 12);
+            let tempUsername = baseName;
+            let suffix = 1;
+            while (await User.findOne({ username: tempUsername })) {
+              tempUsername = `${baseName}${suffix++}`;
+            }
+
+            const referralCode = await ensureUniqueReferralCode(tempUsername);
+
+            user = await User.create({
+              email: googleUser.email.toLowerCase(),
+              password: null,
+              username: tempUsername,
+              display_name: googleUser.name || googleUser.given_name || "FOFA Fan",
+              profile_pic: googleUser.picture || null,
+              google_id: googleUser.id,
+              auth_providers: ["google"],
+              needs_username: true, // Prompt to set proper username
+              referral_code: referralCode,
+            });
+
+            // Welcome bonus
+            await Activity.create({
+              user_id: user._id,
+              activity_type: "engagement",
+              description: "Welcome to FOFA! 🎉",
+              points: 50,
+            });
+            await recalculateUserScores(user._id);
+          }
+        }
+
+        // Issue FOFA JWT
+        const token = jwt.sign(
+          { userId: user._id.toString(), email: user.email, username: user.username },
+          JWT_SECRET,
+          { expiresIn: "30d" }
+        );
+
+        // Redirect to frontend with token
+        const isNew = user.needs_username ? "1" : "0";
+        return res.redirect(302, `${BASE_URL}/#portal?social_token=${token}&is_new=${isNew}`);
+
+      } catch (err) {
+        console.error("Google callback error:", err);
+        return res.redirect(302, `${BASE_URL}/#portal?error=google_failed`);
+      }
+    }
+
+    // ── TWITTER / X ─────────────────────────────────────────────────────────
+
+    // Step 1: Redirect user to Twitter
+    if (pathname.endsWith("/auth/twitter") && req.method === "GET") {
+      const TWITTER_CLIENT_ID = process.env.TWITTER_CLIENT_ID;
+      if (!TWITTER_CLIENT_ID) {
+        return res.status(500).json({ error: "Twitter OAuth not configured" });
+      }
+
+      const BASE_URL = process.env.PUBLIC_URL || "https://fofa.lol";
+
+      // Twitter uses PKCE flow
+      const codeVerifier = Buffer.from(Math.random().toString(36).repeat(3)).toString("base64url").slice(0, 64);
+      const codeChallenge = codeVerifier; // For S256, would need crypto.createHash, using plain for simplicity
+
+      const state = Buffer.from(JSON.stringify({
+        ts: Date.now(),
+        verifier: codeVerifier,
+      })).toString("base64url");
+
+      const params = new URLSearchParams({
+        response_type: "code",
+        client_id: TWITTER_CLIENT_ID,
+        redirect_uri: `${BASE_URL}/api/auth/twitter/callback`,
+        scope: "tweet.read users.read offline.access",
+        state,
+        code_challenge: codeChallenge,
+        code_challenge_method: "plain",
+      });
+
+      return res.redirect(302, `https://twitter.com/i/oauth2/authorize?${params}`);
+    }
+
+    // Step 2: Handle Twitter callback
+    if (pathname.endsWith("/auth/twitter/callback") && req.method === "GET") {
+      const TWITTER_CLIENT_ID = process.env.TWITTER_CLIENT_ID;
+      const TWITTER_CLIENT_SECRET = process.env.TWITTER_CLIENT_SECRET;
+      const BASE_URL = process.env.PUBLIC_URL || "https://fofa.lol";
+
+      const queryString = url.includes("?") ? url.split("?")[1] : "";
+      const params = new URLSearchParams(queryString);
+      const code = params.get("code");
+      const state = params.get("state");
+      const error = params.get("error");
+
+      if (error || !code || !state) {
+        return res.redirect(302, `${BASE_URL}/#portal?error=twitter_cancelled`);
+      }
+
+      try {
+        // Decode state to get code verifier
+        const stateData = JSON.parse(Buffer.from(state, "base64url").toString());
+        const codeVerifier = stateData.verifier;
+
+        // Exchange code for token
+        const credentials = Buffer.from(`${TWITTER_CLIENT_ID}:${TWITTER_CLIENT_SECRET}`).toString("base64");
+        const tokenResponse = await fetch("https://api.twitter.com/2/oauth2/token", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${credentials}`,
+          },
+          body: new URLSearchParams({
+            code,
+            grant_type: "authorization_code",
+            redirect_uri: `${BASE_URL}/api/auth/twitter/callback`,
+            code_verifier: codeVerifier,
+          }),
+        });
+
+        if (!tokenResponse.ok) {
+          throw new Error("Failed to exchange Twitter code for token");
+        }
+
+        const tokenData = await tokenResponse.json();
+
+        // Get Twitter user info
+        const userInfoResponse = await fetch(
+          "https://api.twitter.com/2/users/me?user.fields=id,name,username,profile_image_url,email",
+          { headers: { Authorization: `Bearer ${tokenData.access_token}` } }
+        );
+
+        if (!userInfoResponse.ok) {
+          throw new Error("Failed to fetch Twitter user info");
+        }
+
+        const { data: twitterUser } = await userInfoResponse.json();
+        // twitterUser = { id, name, username, profile_image_url }
+
+        // Twitter doesn't always give email - use twitter_id as identifier
+        let user = await User.findOne({ twitter_id: twitterUser.id });
+
+        if (!user) {
+          // Try email match if available
+          if (twitterUser.email) {
+            user = await User.findOne({ email: twitterUser.email.toLowerCase() });
+          }
+
+          if (user) {
+            // Link Twitter to existing account
+            user.twitter_id = twitterUser.id;
+            if (!user.auth_providers.includes("twitter")) {
+              user.auth_providers.push("twitter");
+            }
+            if (!user.profile_pic && twitterUser.profile_image_url) {
+              user.profile_pic = twitterUser.profile_image_url.replace("_normal", "_400x400");
+            }
+            user.updated_at = new Date();
+            await user.save();
+          } else {
+            // New user via Twitter
+            const baseName = (twitterUser.username || "fan")
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, "")
+              .slice(0, 12);
+            let tempUsername = baseName;
+            let suffix = 1;
+            while (await User.findOne({ username: tempUsername })) {
+              tempUsername = `${baseName}${suffix++}`;
+            }
+
+            // Generate placeholder email (Twitter doesn't always give email)
+            const placeholderEmail = twitterUser.email?.toLowerCase()
+              || `twitter_${twitterUser.id}@placeholder.fofa.lol`;
+
+            const referralCode = await ensureUniqueReferralCode(tempUsername);
+
+            user = await User.create({
+              email: placeholderEmail,
+              password: null,
+              username: tempUsername,
+              display_name: twitterUser.name || twitterUser.username,
+              profile_pic: twitterUser.profile_image_url
+                ? twitterUser.profile_image_url.replace("_normal", "_400x400")
+                : null,
+              twitter_id: twitterUser.id,
+              auth_providers: ["twitter"],
+              needs_username: true,
+              referral_code: referralCode,
+            });
+
+            // Welcome bonus
+            await Activity.create({
+              user_id: user._id,
+              activity_type: "engagement",
+              description: "Welcome to FOFA! 🎉",
+              points: 50,
+            });
+            await recalculateUserScores(user._id);
+          }
+        }
+
+        const token = jwt.sign(
+          { userId: user._id.toString(), email: user.email, username: user.username },
+          JWT_SECRET,
+          { expiresIn: "30d" }
+        );
+
+        const isNew = user.needs_username ? "1" : "0";
+        return res.redirect(302, `${BASE_URL}/#portal?social_token=${token}&is_new=${isNew}`);
+
+      } catch (err) {
+        console.error("Twitter callback error:", err);
+        return res.redirect(302, `${BASE_URL}/#portal?error=twitter_failed`);
+      }
+    }
+
+    // ── COMPLETE PROFILE (after first social login) ──────────────────────────
+
+    if (pathname.endsWith("/auth/social/complete") && req.method === "POST") {
+      const decoded = verifyToken(req);
+      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
+
+      const { username, favorite_club } = req.body || {};
+
+      if (!username || username.length < 3) {
+        return res.status(400).json({ error: "Username must be at least 3 characters" });
+      }
+      if (!/^[a-z0-9_]+$/.test(username.toLowerCase())) {
+        return res.status(400).json({ error: "Username can only contain letters, numbers, and underscores" });
+      }
+
+      // Check uniqueness (excluding own account)
+      const existing = await User.findOne({
+        username: username.toLowerCase(),
+        _id: { $ne: decoded.userId },
+      });
+      if (existing) {
+        return res.status(409).json({ error: "Username already taken" });
+      }
+
+      const user = await User.findByIdAndUpdate(
+        decoded.userId,
+        {
+          username: username.toLowerCase(),
+          favorite_club: favorite_club || "",
+          needs_username: false,
+          updated_at: new Date(),
+        },
+        { new: true }
+      );
+
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      // Issue fresh token with updated username
+      const newToken = jwt.sign(
+        { userId: user._id.toString(), email: user.email, username: user.username },
+        JWT_SECRET,
+        { expiresIn: "30d" }
+      );
+
+      return res.status(200).json({
+        message: "Profile completed",
+        token: newToken,
+        user: userToPublic(user),
+      });
+    }
+
     // ============ REFERRAL ENDPOINTS ============
     
     // Get my referral info
@@ -1266,7 +1377,7 @@ export default async function handler(req, res) {
       
       return res.status(200).json({
         referral_code: user.referral_code,
-        referral_link: `${process.env.PUBLIC_URL || "https://fofa.lol"}/#join?ref=${user.referral_code}`,
+        referral_link: `${process.env.PUBLIC_URL || "https://fofa-xi.vercel.app"}/#join?ref=${user.referral_code}`,
         referral_count: user.referral_count || 0,
         recruiter_rank: myRank,
         referred_users: referredUsers.map(u => ({
@@ -1894,25 +2005,9 @@ export default async function handler(req, res) {
                 id: expertViaApp._id.toString(),
                 slug: expertViaApp.slug,
                 full_name: expertViaApp.full_name,
-                display_name: expertViaApp.display_name,
                 expert_type: expertViaApp.expert_type,
                 tier: expertViaApp.tier,
-                bio: expertViaApp.bio,
-                current_role: expertViaApp.current_role,
-                country: expertViaApp.country,
-                region_focus: expertViaApp.region_focus,
-                website: expertViaApp.website,
-                social: {
-                  twitter: expertViaApp.social_twitter,
-                  instagram: expertViaApp.social_instagram,
-                  linkedin: expertViaApp.social_linkedin,
-                  youtube: expertViaApp.social_youtube,
-                },
-                clubs_supported: expertViaApp.clubs_supported,
-                expertise_areas: expertViaApp.expertise_areas,
-                profile_pic: expertViaApp.profile_pic,
                 endorsement_count: expertViaApp.endorsement_count,
-                is_featured: expertViaApp.is_featured,
               },
             });
           }
@@ -1926,203 +2021,13 @@ export default async function handler(req, res) {
           id: expert._id.toString(),
           slug: expert.slug,
           full_name: expert.full_name,
-          display_name: expert.display_name,
-          expert_type: expert.expert_type,
-          tier: expert.tier,
-          bio: expert.bio,
-          current_role: expert.current_role,
-          country: expert.country,
-          region_focus: expert.region_focus,
-          website: expert.website,
-          social: {
-            twitter: expert.social_twitter,
-            instagram: expert.social_instagram,
-            linkedin: expert.social_linkedin,
-            youtube: expert.social_youtube,
-          },
-          clubs_supported: expert.clubs_supported,
-          expertise_areas: expert.expertise_areas,
-          profile_pic: expert.profile_pic,
-          endorsement_count: expert.endorsement_count,
-          is_featured: expert.is_featured,
-        },
-      });
-    }
-
-    // ========================================================================
-    // UPDATE EXPERT PROFILE (expert edits own profile)
-    // ========================================================================
-    if (pathname.endsWith("/experts/me") && req.method === "PATCH") {
-      const decoded = verifyToken(req);
-      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
-
-      const user = await User.findById(decoded.userId);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      // Find expert profile via application email match
-      let expert = await Expert.findOne({ user_id: decoded.userId, status: "active" });
-      if (!expert) {
-        const application = await ExpertApplication.findOne({
-          email: user.email.toLowerCase(),
-          status: "approved",
-        });
-        if (application && application.approved_expert_id) {
-          expert = await Expert.findById(application.approved_expert_id);
-        }
-      }
-      if (!expert || expert.status !== "active") {
-        return res.status(403).json({ error: "Active expert profile required" });
-      }
-
-      const data = req.body || {};
-      const allowedFields = [
-        "display_name", "bio", "current_role", "country", "region_focus",
-        "website", "social_twitter", "social_instagram", "social_linkedin",
-        "social_youtube", "clubs_supported", "expertise_areas", "profile_pic",
-      ];
-
-      let updated = false;
-      for (const field of allowedFields) {
-        if (data[field] !== undefined) {
-          if (field === "clubs_supported" || field === "expertise_areas") {
-            expert[field] = Array.isArray(data[field])
-              ? data[field].map(s => String(s).trim()).filter(Boolean)
-              : String(data[field]).split(",").map(s => s.trim()).filter(Boolean);
-          } else {
-            expert[field] = String(data[field]).trim();
-          }
-          updated = true;
-        }
-      }
-
-      if (!updated) {
-        return res.status(400).json({ error: "No valid fields to update" });
-      }
-
-      expert.updated_at = new Date();
-      await expert.save();
-
-      return res.status(200).json({
-        message: "Profile updated",
-        expert: {
-          id: expert._id.toString(),
-          slug: expert.slug,
-          full_name: expert.full_name,
-          display_name: expert.display_name,
-          bio: expert.bio,
-          current_role: expert.current_role,
-          country: expert.country,
-          region_focus: expert.region_focus,
-          website: expert.website,
-          social: {
-            twitter: expert.social_twitter,
-            instagram: expert.social_instagram,
-            linkedin: expert.social_linkedin,
-            youtube: expert.social_youtube,
-          },
-          clubs_supported: expert.clubs_supported,
-          expertise_areas: expert.expertise_areas,
-          profile_pic: expert.profile_pic,
           expert_type: expert.expert_type,
           tier: expert.tier,
           endorsement_count: expert.endorsement_count,
         },
       });
     }
-
-    // ========================================================================
-    // EDIT ENDORSEMENT (expert edits own endorsement)
-    // ========================================================================
-    if (pathname.match(/\/experts\/endorsements\/[^\/]+$/) && req.method === "PATCH") {
-      const decoded = verifyToken(req);
-      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
-
-      const user = await User.findById(decoded.userId);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      // Find expert
-      let expert = await Expert.findOne({ user_id: decoded.userId, status: "active" });
-      if (!expert) {
-        const application = await ExpertApplication.findOne({
-          email: user.email.toLowerCase(),
-          status: "approved",
-        });
-        if (application && application.approved_expert_id) {
-          expert = await Expert.findById(application.approved_expert_id);
-        }
-      }
-      if (!expert) return res.status(403).json({ error: "Expert access required" });
-
-      const endorsementId = pathname.split("/").pop();
-      const endorsement = await Endorsement.findById(endorsementId);
-      if (!endorsement) return res.status(404).json({ error: "Endorsement not found" });
-
-      // Verify ownership
-      if (endorsement.expert_id.toString() !== expert._id.toString()) {
-        return res.status(403).json({ error: "You can only edit your own endorsements" });
-      }
-
-      const { endorsement_text } = req.body || {};
-      if (!endorsement_text || endorsement_text.trim().length < 20) {
-        return res.status(400).json({ error: "Endorsement text required (minimum 20 chars)" });
-      }
-
-      endorsement.endorsement_text = endorsement_text.trim();
-      await endorsement.save();
-
-      return res.status(200).json({
-        message: "Endorsement updated",
-        endorsement: {
-          id: endorsement._id.toString(),
-          endorsement_text: endorsement.endorsement_text,
-        },
-      });
-    }
-
-    // ========================================================================
-    // DELETE ENDORSEMENT (expert deletes own endorsement)
-    // ========================================================================
-    if (pathname.match(/\/experts\/endorsements\/[^\/]+$/) && req.method === "DELETE") {
-      const decoded = verifyToken(req);
-      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
-
-      const user = await User.findById(decoded.userId);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      // Find expert
-      let expert = await Expert.findOne({ user_id: decoded.userId, status: "active" });
-      if (!expert) {
-        const application = await ExpertApplication.findOne({
-          email: user.email.toLowerCase(),
-          status: "approved",
-        });
-        if (application && application.approved_expert_id) {
-          expert = await Expert.findById(application.approved_expert_id);
-        }
-      }
-      if (!expert) return res.status(403).json({ error: "Expert access required" });
-
-      const endorsementId = pathname.split("/").pop();
-      const endorsement = await Endorsement.findById(endorsementId);
-      if (!endorsement) return res.status(404).json({ error: "Endorsement not found" });
-
-      // Verify ownership
-      if (endorsement.expert_id.toString() !== expert._id.toString()) {
-        return res.status(403).json({ error: "You can only delete your own endorsements" });
-      }
-
-      await Endorsement.findByIdAndDelete(endorsementId);
-
-      // Decrement endorsement count
-      if (expert.endorsement_count > 0) {
-        expert.endorsement_count -= 1;
-        expert.contribution_score = Math.max(0, expert.contribution_score - 100);
-        await expert.save();
-      }
-
-      return res.status(200).json({ message: "Endorsement deleted" });
-    }
-
+    
     // Submit endorsement (expert endorses a club)
     if (pathname.endsWith("/experts/endorse") && req.method === "POST") {
       const decoded = verifyToken(req);
@@ -2173,17 +2078,7 @@ export default async function handler(req, res) {
       expert.endorsement_count += 1;
       expert.contribution_score += 100;
       await expert.save();
-
-      // Notify club admins of new endorsement
-      if (club_id) {
-        const endorsedClub = await Club.findById(club_id);
-        if (endorsedClub) {
-          for (const adminId of endorsedClub.admin_user_ids || []) {
-            await createNotification(adminId, "endorsement", `${expert.name} endorsed ${endorsedClub.name}`, endorsement_text.slice(0, 100), `#clubs/${endorsedClub.slug}`);
-          }
-        }
-      }
-
+      
       return res.status(201).json({
         message: "Endorsement submitted",
         endorsement: {
@@ -2553,980 +2448,6 @@ export default async function handler(req, res) {
       return res.status(200).json({
         is_admin: isAdmin(decoded),
         admin_emails_configured: ADMIN_EMAILS.length > 0,
-      });
-    }
-
-    // ========================================================================
-    // ARTICLE ENDPOINTS (Voice publishing)
-    // ========================================================================
-
-    // Helper: generate unique article slug
-    async function ensureUniqueArticleSlug(title) {
-      let baseSlug = slugifyName(title);
-      if (!baseSlug) baseSlug = "article";
-      let slug = baseSlug;
-      let counter = 0;
-      while (await Article.findOne({ slug })) {
-        counter++;
-        slug = `${baseSlug}-${counter}`;
-      }
-      return slug;
-    }
-
-    // Helper: find expert from token
-    async function findExpertFromToken(decoded) {
-      if (!decoded) return null;
-      const user = await User.findById(decoded.userId);
-      if (!user) return null;
-      let expert = await Expert.findOne({ user_id: decoded.userId, status: "active" });
-      if (!expert) {
-        const application = await ExpertApplication.findOne({
-          email: user.email.toLowerCase(),
-          status: "approved",
-        });
-        if (application && application.approved_expert_id) {
-          expert = await Expert.findById(application.approved_expert_id);
-        }
-      }
-      return expert && expert.status === "active" ? expert : null;
-    }
-
-    // Create article (expert only)
-    if (pathname.endsWith("/experts/articles") && req.method === "POST") {
-      const decoded = verifyToken(req);
-      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
-      const expert = await findExpertFromToken(decoded);
-      if (!expert) return res.status(403).json({ error: "Expert access required" });
-
-      const { title, content, summary, tags, club_ids, status: articleStatus } = req.body || {};
-      if (!title || !content) {
-        return res.status(400).json({ error: "Title and content are required" });
-      }
-      if (content.length < 50) {
-        return res.status(400).json({ error: "Content must be at least 50 characters" });
-      }
-
-      const slug = await ensureUniqueArticleSlug(title);
-      const now = new Date();
-      const isPublished = articleStatus === "published";
-
-      const article = await Article.create({
-        expert_id: expert._id,
-        title: title.trim(),
-        slug,
-        content: content.trim(),
-        summary: (summary || "").trim(),
-        tags: Array.isArray(tags) ? tags.map(t => t.trim()).filter(Boolean) : [],
-        club_ids: Array.isArray(club_ids) ? club_ids.filter(Boolean) : [],
-        status: isPublished ? "published" : "draft",
-        published_at: isPublished ? now : null,
-        created_at: now,
-        updated_at: now,
-      });
-
-      return res.status(201).json({
-        message: isPublished ? "Article published" : "Draft saved",
-        article: {
-          id: article._id.toString(),
-          slug: article.slug,
-          title: article.title,
-          status: article.status,
-        },
-      });
-    }
-
-    // List own articles (expert only)
-    if (pathname.endsWith("/experts/articles") && req.method === "GET") {
-      const decoded = verifyToken(req);
-      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
-      const expert = await findExpertFromToken(decoded);
-      if (!expert) return res.status(403).json({ error: "Expert access required" });
-
-      const articles = await Article.find({ expert_id: expert._id })
-        .sort({ updated_at: -1 })
-        .select("title slug summary tags status views published_at created_at updated_at");
-
-      return res.status(200).json({
-        articles: articles.map(a => ({
-          id: a._id.toString(),
-          title: a.title,
-          slug: a.slug,
-          summary: a.summary,
-          tags: a.tags,
-          status: a.status,
-          views: a.views,
-          published_at: a.published_at,
-          created_at: a.created_at,
-          updated_at: a.updated_at,
-        })),
-      });
-    }
-
-    // Update article (expert only, own articles)
-    if (pathname.match(/\/experts\/articles\/[^\/]+$/) && req.method === "PATCH") {
-      const decoded = verifyToken(req);
-      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
-      const expert = await findExpertFromToken(decoded);
-      if (!expert) return res.status(403).json({ error: "Expert access required" });
-
-      const articleId = pathname.split("/").pop();
-      const article = await Article.findById(articleId);
-      if (!article) return res.status(404).json({ error: "Article not found" });
-      if (article.expert_id.toString() !== expert._id.toString()) {
-        return res.status(403).json({ error: "You can only edit your own articles" });
-      }
-
-      const data = req.body || {};
-      const allowedFields = ["title", "content", "summary", "tags", "club_ids", "status"];
-      for (const field of allowedFields) {
-        if (data[field] !== undefined) {
-          if (field === "tags") {
-            article.tags = Array.isArray(data.tags) ? data.tags.map(t => t.trim()).filter(Boolean) : [];
-          } else if (field === "club_ids") {
-            article.club_ids = Array.isArray(data.club_ids) ? data.club_ids.filter(Boolean) : [];
-          } else if (field === "status") {
-            if (data.status === "published" && article.status !== "published") {
-              article.status = "published";
-              article.published_at = new Date();
-            } else if (data.status === "draft") {
-              article.status = "draft";
-            }
-          } else {
-            article[field] = String(data[field]).trim();
-          }
-        }
-      }
-
-      article.updated_at = new Date();
-      await article.save();
-
-      return res.status(200).json({
-        message: "Article updated",
-        article: {
-          id: article._id.toString(),
-          slug: article.slug,
-          title: article.title,
-          status: article.status,
-        },
-      });
-    }
-
-    // Delete article (expert only, own articles)
-    if (pathname.match(/\/experts\/articles\/[^\/]+$/) && req.method === "DELETE") {
-      const decoded = verifyToken(req);
-      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
-      const expert = await findExpertFromToken(decoded);
-      if (!expert) return res.status(403).json({ error: "Expert access required" });
-
-      const articleId = pathname.split("/").pop();
-      const article = await Article.findById(articleId);
-      if (!article) return res.status(404).json({ error: "Article not found" });
-      if (article.expert_id.toString() !== expert._id.toString()) {
-        return res.status(403).json({ error: "You can only delete your own articles" });
-      }
-
-      await Article.findByIdAndDelete(articleId);
-      return res.status(200).json({ message: "Article deleted" });
-    }
-
-    // Public: List published articles
-    if (pathname.endsWith("/articles") && req.method === "GET" && !pathname.includes("/experts/")) {
-      const params = new URL(req.url, `http://${req.headers.host}`).searchParams;
-      const limit = Math.min(parseInt(params.get("limit") || "20"), 50);
-      const offset = parseInt(params.get("offset") || "0");
-      const tag = params.get("tag");
-      const expert_slug = params.get("expert");
-
-      const query = { status: "published" };
-      if (tag) query.tags = tag;
-      if (expert_slug) {
-        const exp = await Expert.findOne({ slug: expert_slug, status: "active" });
-        if (exp) query.expert_id = exp._id;
-      }
-
-      const [articles, total] = await Promise.all([
-        Article.find(query)
-          .sort({ published_at: -1 })
-          .skip(offset)
-          .limit(limit)
-          .populate("expert_id", "full_name display_name slug expert_type tier profile_pic"),
-        Article.countDocuments(query),
-      ]);
-
-      return res.status(200).json({
-        articles: articles.map(a => ({
-          id: a._id.toString(),
-          title: a.title,
-          slug: a.slug,
-          summary: a.summary,
-          tags: a.tags,
-          views: a.views,
-          published_at: a.published_at,
-          expert: a.expert_id ? {
-            full_name: a.expert_id.full_name,
-            display_name: a.expert_id.display_name,
-            slug: a.expert_id.slug,
-            expert_type: a.expert_id.expert_type,
-            tier: a.expert_id.tier,
-            profile_pic: a.expert_id.profile_pic,
-          } : null,
-        })),
-        meta: { total, limit, offset },
-      });
-    }
-
-    // Public: Get single article by slug
-    if (pathname.match(/\/articles\/[a-z0-9-]+$/) && req.method === "GET" && !pathname.includes("/experts/")) {
-      const slug = pathname.split("/").pop();
-      const article = await Article.findOne({ slug, status: "published" })
-        .populate("expert_id", "full_name display_name slug expert_type tier profile_pic current_role");
-
-      if (!article) return res.status(404).json({ error: "Article not found" });
-
-      // Increment views
-      article.views += 1;
-      await article.save();
-
-      return res.status(200).json({
-        article: {
-          id: article._id.toString(),
-          title: article.title,
-          slug: article.slug,
-          content: article.content,
-          summary: article.summary,
-          tags: article.tags,
-          views: article.views,
-          published_at: article.published_at,
-          created_at: article.created_at,
-          expert: article.expert_id ? {
-            full_name: article.expert_id.full_name,
-            display_name: article.expert_id.display_name,
-            slug: article.expert_id.slug,
-            expert_type: article.expert_id.expert_type,
-            tier: article.expert_id.tier,
-            profile_pic: article.expert_id.profile_pic,
-            current_role: article.expert_id.current_role,
-          } : null,
-        },
-      });
-    }
-
-    // ========================================================================
-    // REPORT ENDPOINTS (Ambassador moderation)
-    // ========================================================================
-
-    // Submit report (ambassador experts only)
-    if (pathname.endsWith("/experts/reports") && req.method === "POST") {
-      const decoded = verifyToken(req);
-      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
-      const expert = await findExpertFromToken(decoded);
-      if (!expert) return res.status(403).json({ error: "Expert access required" });
-      if (expert.expert_type !== "ambassador") {
-        return res.status(403).json({ error: "Ambassador role required for moderation" });
-      }
-
-      const { target_type, target_id, target_name, reason, details } = req.body || {};
-      if (!target_type || !target_id || !reason) {
-        return res.status(400).json({ error: "target_type, target_id, and reason are required" });
-      }
-      if (!["activity", "user", "endorsement", "article", "club"].includes(target_type)) {
-        return res.status(400).json({ error: "Invalid target_type" });
-      }
-      if (reason.length < 10) {
-        return res.status(400).json({ error: "Reason must be at least 10 characters" });
-      }
-
-      // Check for duplicate recent report
-      const recentDupe = await Report.findOne({
-        reporter_expert_id: expert._id,
-        target_type,
-        target_id,
-        status: { $in: ["pending", "reviewing"] },
-      });
-      if (recentDupe) {
-        return res.status(409).json({ error: "You already have an open report for this item" });
-      }
-
-      const report = await Report.create({
-        reporter_expert_id: expert._id,
-        target_type,
-        target_id,
-        target_name: (target_name || "").trim(),
-        reason: reason.trim(),
-        details: (details || "").trim(),
-      });
-
-      return res.status(201).json({
-        message: "Report submitted",
-        report: { id: report._id.toString(), status: report.status },
-      });
-    }
-
-    // List own reports (ambassador only)
-    if (pathname.endsWith("/experts/reports") && req.method === "GET") {
-      const decoded = verifyToken(req);
-      if (!decoded) return res.status(401).json({ error: "Unauthorized" });
-      const expert = await findExpertFromToken(decoded);
-      if (!expert) return res.status(403).json({ error: "Expert access required" });
-
-      const reports = await Report.find({ reporter_expert_id: expert._id })
-        .sort({ created_at: -1 })
-        .limit(50);
-
-      return res.status(200).json({
-        reports: reports.map(r => ({
-          id: r._id.toString(),
-          target_type: r.target_type,
-          target_id: r.target_id,
-          target_name: r.target_name,
-          reason: r.reason,
-          details: r.details,
-          status: r.status,
-          resolution_note: r.resolution_note,
-          resolved_at: r.resolved_at,
-          created_at: r.created_at,
-        })),
-      });
-    }
-
-    // Admin: list all reports
-    if (pathname.endsWith("/admin/reports") && req.method === "GET") {
-      const decoded = verifyToken(req);
-      if (!isAdmin(decoded)) return res.status(403).json({ error: "Admin access required" });
-
-      const params = new URL(req.url, `http://${req.headers.host}`).searchParams;
-      const status = params.get("status");
-      const query = {};
-      if (status) query.status = status;
-
-      const reports = await Report.find(query)
-        .sort({ created_at: -1 })
-        .limit(100)
-        .populate("reporter_expert_id", "full_name display_name slug expert_type tier");
-
-      return res.status(200).json({
-        reports: reports.map(r => ({
-          id: r._id.toString(),
-          reporter: r.reporter_expert_id ? {
-            full_name: r.reporter_expert_id.full_name,
-            slug: r.reporter_expert_id.slug,
-            tier: r.reporter_expert_id.tier,
-          } : null,
-          target_type: r.target_type,
-          target_id: r.target_id,
-          target_name: r.target_name,
-          reason: r.reason,
-          details: r.details,
-          status: r.status,
-          resolution_note: r.resolution_note,
-          resolved_by: r.resolved_by,
-          resolved_at: r.resolved_at,
-          created_at: r.created_at,
-        })),
-        counts: {
-          pending: await Report.countDocuments({ status: "pending" }),
-          reviewing: await Report.countDocuments({ status: "reviewing" }),
-          resolved: await Report.countDocuments({ status: "resolved" }),
-          dismissed: await Report.countDocuments({ status: "dismissed" }),
-        },
-      });
-    }
-
-    // Admin: resolve/dismiss report
-    if (pathname.match(/\/admin\/reports\/[^\/]+$/) && req.method === "PATCH") {
-      const decoded = verifyToken(req);
-      if (!isAdmin(decoded)) return res.status(403).json({ error: "Admin access required" });
-
-      const reportId = pathname.split("/").pop();
-      const report = await Report.findById(reportId);
-      if (!report) return res.status(404).json({ error: "Report not found" });
-
-      const { status: newStatus, resolution_note } = req.body || {};
-      if (!["reviewing", "resolved", "dismissed"].includes(newStatus)) {
-        return res.status(400).json({ error: "Status must be reviewing, resolved, or dismissed" });
-      }
-
-      report.status = newStatus;
-      if (newStatus === "resolved" || newStatus === "dismissed") {
-        report.resolved_by = decoded.email;
-        report.resolution_note = (resolution_note || "").trim();
-        report.resolved_at = new Date();
-      }
-      await report.save();
-
-      return res.status(200).json({ message: `Report ${newStatus}` });
-    }
-
-    // ========================================================================
-    // CLUB FOLLOWING ENDPOINTS
-    // ========================================================================
-
-    // POST /clubs/:slug/follow — follow a club
-    if (pathname.match(/\/clubs\/[^\/]+\/follow$/) && req.method === "POST") {
-      const decoded = verifyToken(req);
-      const slug = pathname.split("/").slice(-2, -1)[0];
-      const club = await Club.findOne({ slug, status: "active" });
-      if (!club) return res.status(404).json({ error: "Club not found" });
-
-      const user = await User.findById(decoded.id);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      if (user.following_clubs.includes(club._id)) {
-        return res.status(400).json({ error: "Already following this club" });
-      }
-
-      user.following_clubs.push(club._id);
-      user.updated_at = new Date();
-      await user.save();
-
-      // Increment club fan_count
-      club.fan_count = (club.fan_count || 0) + 1;
-      await club.save();
-
-      // Award badge: first club followed
-      await checkAndAwardBadge(user, "first_follow", "First Follow", "Followed your first club", "⚽");
-
-      // Notify club admins of new follower
-      for (const adminId of club.admin_user_ids || []) {
-        await createNotification(adminId, "new_follower", `${user.display_name} followed ${club.name}`, "", `#clubs/${club.slug}`);
-      }
-
-      return res.status(200).json({
-        message: `Now following ${club.name}`,
-        following_count: user.following_clubs.length,
-        club_fan_count: club.fan_count,
-      });
-    }
-
-    // DELETE /clubs/:slug/follow — unfollow a club
-    if (pathname.match(/\/clubs\/[^\/]+\/follow$/) && req.method === "DELETE") {
-      const decoded = verifyToken(req);
-      const slug = pathname.split("/").slice(-2, -1)[0];
-      const club = await Club.findOne({ slug, status: "active" });
-      if (!club) return res.status(404).json({ error: "Club not found" });
-
-      const user = await User.findById(decoded.id);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      const idx = user.following_clubs.indexOf(club._id);
-      if (idx === -1) {
-        return res.status(400).json({ error: "Not following this club" });
-      }
-
-      user.following_clubs.splice(idx, 1);
-      user.updated_at = new Date();
-      await user.save();
-
-      club.fan_count = Math.max(0, (club.fan_count || 1) - 1);
-      await club.save();
-
-      return res.status(200).json({
-        message: `Unfollowed ${club.name}`,
-        following_count: user.following_clubs.length,
-        club_fan_count: club.fan_count,
-      });
-    }
-
-    // GET /user/following — get clubs the user follows
-    if (pathname === "/api/user/following" && req.method === "GET") {
-      const decoded = verifyToken(req);
-      const user = await User.findById(decoded.id);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      const clubs = await Club.find({
-        _id: { $in: user.following_clubs },
-        status: "active",
-      }).select("name slug country league stadium fan_count logo_url");
-
-      return res.status(200).json({ clubs });
-    }
-
-    // ========================================================================
-    // ACTIVITY FEED ENDPOINT
-    // ========================================================================
-
-    // GET /feed — aggregated platform activity feed
-    if (pathname === "/api/feed" && req.method === "GET") {
-      const limit = Math.min(parseInt(req.query?.limit) || 30, 50);
-      const before = req.query?.before;
-      const feedItems = [];
-
-      // Fetch recent activities (fan loyalty actions)
-      const activityQuery = {};
-      if (before) activityQuery.created_at = { $lt: new Date(before) };
-      const recentActivities = await Activity.find(activityQuery)
-        .sort({ created_at: -1 })
-        .limit(limit)
-        .populate("user_id", "display_name username");
-
-      recentActivities.forEach(a => {
-        if (a.user_id) {
-          feedItems.push({
-            type: "activity",
-            icon: "⚡",
-            title: `${a.user_id.display_name} logged an activity`,
-            subtitle: a.description || a.activity_type,
-            points: a.points,
-            timestamp: a.created_at,
-            user: { display_name: a.user_id.display_name, username: a.user_id.username },
-          });
-        }
-      });
-
-      // Fetch recent endorsements
-      const endorseQuery = {};
-      if (before) endorseQuery.created_at = { $lt: new Date(before) };
-      const recentEndorsements = await Endorsement.find(endorseQuery)
-        .sort({ created_at: -1 })
-        .limit(limit)
-        .populate("expert_id", "name slug")
-        .populate("club_id", "name slug");
-
-      recentEndorsements.forEach(e => {
-        if (e.expert_id && e.club_id) {
-          feedItems.push({
-            type: "endorsement",
-            icon: "🛡️",
-            title: `${e.expert_id.name} endorsed ${e.club_id.name}`,
-            subtitle: e.content.length > 100 ? e.content.slice(0, 100) + "…" : e.content,
-            timestamp: e.created_at,
-            expert: { name: e.expert_id.name, slug: e.expert_id.slug },
-            club: { name: e.club_id.name, slug: e.club_id.slug },
-          });
-        }
-      });
-
-      // Fetch recent published articles
-      const articleQuery = { status: "published" };
-      if (before) articleQuery.published_at = { $lt: new Date(before) };
-      const recentArticles = await Article.find(articleQuery)
-        .sort({ published_at: -1 })
-        .limit(limit)
-        .populate("expert_id", "name slug");
-
-      recentArticles.forEach(a => {
-        if (a.expert_id) {
-          feedItems.push({
-            type: "article",
-            icon: "📝",
-            title: a.title,
-            subtitle: a.summary || "",
-            timestamp: a.published_at || a.created_at,
-            expert: { name: a.expert_id.name, slug: a.expert_id.slug },
-            slug: a.slug,
-            tags: a.tags,
-            views: a.views,
-          });
-        }
-      });
-
-      // Fetch recently approved clubs
-      const clubQuery = { status: "active" };
-      if (before) clubQuery.approved_at = { $lt: new Date(before) };
-      const recentClubs = await Club.find(clubQuery)
-        .sort({ approved_at: -1 })
-        .limit(10)
-        .select("name slug country league approved_at");
-
-      recentClubs.forEach(c => {
-        feedItems.push({
-          type: "club_joined",
-          icon: "🏟️",
-          title: `${c.name} joined FOFA`,
-          subtitle: `${c.league}, ${c.country}`,
-          timestamp: c.approved_at,
-          club: { name: c.name, slug: c.slug },
-        });
-      });
-
-      // Sort all items by timestamp descending, limit
-      feedItems.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      const trimmed = feedItems.slice(0, limit);
-
-      return res.status(200).json({
-        feed: trimmed,
-        has_more: feedItems.length > limit,
-        next_before: trimmed.length > 0 ? trimmed[trimmed.length - 1].timestamp : null,
-      });
-    }
-
-    // ========================================================================
-    // ACHIEVEMENT BADGES ENDPOINTS
-    // ========================================================================
-
-    // GET /user/badges — get current user's badges
-    if (pathname === "/api/user/badges" && req.method === "GET") {
-      const decoded = verifyToken(req);
-      const user = await User.findById(decoded.id).select("badges");
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      // Also compute any un-awarded badges they've earned
-      const newBadges = await computeEarnedBadges(decoded.id);
-      const allBadges = [...(user.badges || [])];
-
-      // Award new ones
-      if (newBadges.length > 0) {
-        for (const b of newBadges) {
-          if (!allBadges.find(existing => existing.badge_id === b.badge_id)) {
-            allBadges.push(b);
-          }
-        }
-        user.badges = allBadges;
-        await user.save();
-      }
-
-      return res.status(200).json({
-        badges: allBadges,
-        available_badges: BADGE_DEFINITIONS,
-      });
-    }
-
-    // GET /user/passport — enriched fan passport data
-    if (pathname === "/api/user/passport" && req.method === "GET") {
-      const decoded = verifyToken(req);
-      const user = await User.findById(decoded.id);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      // Get following clubs
-      const followingClubs = await Club.find({
-        _id: { $in: user.following_clubs || [] },
-        status: "active",
-      }).select("name slug country league fan_count logo_url");
-
-      // Get activity stats
-      const activityCount = await Activity.countDocuments({ user_id: decoded.id });
-      const recentActivities = await Activity.find({ user_id: decoded.id })
-        .sort({ created_at: -1 })
-        .limit(10);
-
-      // Get referral count
-      const referralCount = await User.countDocuments({ referred_by: decoded.id });
-
-      // Compute badges
-      const newBadges = await computeEarnedBadges(decoded.id);
-      const allBadges = [...(user.badges || [])];
-      if (newBadges.length > 0) {
-        for (const b of newBadges) {
-          if (!allBadges.find(existing => existing.badge_id === b.badge_id)) {
-            allBadges.push(b);
-          }
-        }
-        user.badges = allBadges;
-        await user.save();
-      }
-
-      // Leaderboard position
-      const rank = await User.countDocuments({ total_score: { $gt: user.total_score } }) + 1;
-
-      return res.status(200).json({
-        passport: {
-          user: {
-            display_name: user.display_name,
-            username: user.username,
-            email: user.email,
-            favorite_club: user.favorite_club,
-            bio: user.bio,
-            created_at: user.created_at,
-            level: user.level,
-          },
-          scores: {
-            total_score: user.total_score,
-            engagement_score: user.engagement_score,
-            passion_score: user.passion_score,
-            knowledge_score: user.knowledge_score,
-            consistency_score: user.consistency_score,
-            community_score: user.community_score,
-            growth_score: user.growth_score,
-          },
-          rank,
-          following_clubs: followingClubs,
-          badges: allBadges,
-          available_badges: BADGE_DEFINITIONS,
-          stats: {
-            activity_count: activityCount,
-            following_count: (user.following_clubs || []).length,
-            referral_count: referralCount,
-            badge_count: allBadges.length,
-          },
-          recent_activities: recentActivities.map(a => ({
-            type: a.activity_type,
-            description: a.description,
-            points: a.points,
-            created_at: a.created_at,
-          })),
-        },
-      });
-    }
-
-    // ========================================================================
-    // CLUB DASHBOARD ENDPOINTS
-    // ========================================================================
-
-    // GET /clubs/my-club — get club managed by current user
-    if (pathname === "/api/clubs/my-club" && req.method === "GET") {
-      const decoded = verifyToken(req);
-      const club = await Club.findOne({ admin_user_ids: decoded.id, status: "active" });
-      if (!club) return res.status(404).json({ error: "You don't manage any club" });
-
-      // Get follower details
-      const followers = await User.find({ following_clubs: club._id })
-        .select("display_name username total_score level created_at")
-        .sort({ total_score: -1 })
-        .limit(100);
-
-      // Get endorsement count
-      const endorsementCount = await Endorsement.countDocuments({ club_id: club._id });
-
-      // Get recent announcements
-      const announcements = await Announcement.find({ club_id: club._id })
-        .sort({ pinned: -1, created_at: -1 })
-        .limit(20)
-        .populate("author_id", "display_name");
-
-      return res.status(200).json({
-        club,
-        followers,
-        stats: {
-          fan_count: club.fan_count || 0,
-          endorsement_count: endorsementCount,
-          follower_count: followers.length,
-          announcement_count: announcements.length,
-        },
-        announcements: announcements.map(a => ({
-          _id: a._id,
-          title: a.title,
-          content: a.content,
-          pinned: a.pinned,
-          author: a.author_id?.display_name || "Unknown",
-          created_at: a.created_at,
-        })),
-      });
-    }
-
-    // PATCH /clubs/my-club — update club profile (club admin only)
-    if (pathname === "/api/clubs/my-club" && req.method === "PATCH") {
-      const decoded = verifyToken(req);
-      const club = await Club.findOne({ admin_user_ids: decoded.id, status: "active" });
-      if (!club) return res.status(404).json({ error: "You don't manage any club" });
-
-      const allowed = ["description", "stadium", "website", "social_twitter", "social_instagram", "social_facebook", "logo_url", "primary_color", "secondary_color"];
-      const updates = {};
-      for (const key of allowed) {
-        if (req.body[key] !== undefined) {
-          updates[key] = typeof req.body[key] === "string" ? req.body[key].trim() : req.body[key];
-        }
-      }
-      updates.updated_at = new Date();
-
-      Object.assign(club, updates);
-      await club.save();
-
-      return res.status(200).json({ message: "Club profile updated", club });
-    }
-
-    // POST /clubs/my-club/announcements — create announcement
-    if (pathname === "/api/clubs/my-club/announcements" && req.method === "POST") {
-      const decoded = verifyToken(req);
-      const club = await Club.findOne({ admin_user_ids: decoded.id, status: "active" });
-      if (!club) return res.status(404).json({ error: "You don't manage any club" });
-
-      const { title, content, pinned } = req.body || {};
-      if (!title || !content) return res.status(400).json({ error: "Title and content are required" });
-      if (title.length > 200) return res.status(400).json({ error: "Title too long (max 200 chars)" });
-
-      const announcement = await Announcement.create({
-        club_id: club._id,
-        author_id: decoded.id,
-        title: title.trim(),
-        content: content.trim(),
-        pinned: !!pinned,
-      });
-
-      // Notify followers
-      await notifyClubFollowers(club._id, "announcement", `${club.name}: ${title}`, content.slice(0, 100), `#clubs/${club.slug}`);
-
-      return res.status(201).json({ message: "Announcement posted", announcement });
-    }
-
-    // DELETE /clubs/my-club/announcements/:id — delete announcement
-    if (pathname.match(/\/clubs\/my-club\/announcements\/[^\/]+$/) && req.method === "DELETE") {
-      const decoded = verifyToken(req);
-      const club = await Club.findOne({ admin_user_ids: decoded.id, status: "active" });
-      if (!club) return res.status(404).json({ error: "You don't manage any club" });
-
-      const announcementId = pathname.split("/").pop();
-      const announcement = await Announcement.findOne({ _id: announcementId, club_id: club._id });
-      if (!announcement) return res.status(404).json({ error: "Announcement not found" });
-
-      await Announcement.deleteOne({ _id: announcementId });
-      return res.status(200).json({ message: "Announcement deleted" });
-    }
-
-    // GET /clubs/:slug/announcements — public announcements for a club
-    if (pathname.match(/\/clubs\/[a-z0-9-]+\/announcements$/) && req.method === "GET") {
-      const slug = pathname.split("/").slice(-2, -1)[0];
-      const club = await Club.findOne({ slug, status: "active" });
-      if (!club) return res.status(404).json({ error: "Club not found" });
-
-      const announcements = await Announcement.find({ club_id: club._id })
-        .sort({ pinned: -1, created_at: -1 })
-        .limit(20)
-        .populate("author_id", "display_name");
-
-      return res.status(200).json({
-        announcements: announcements.map(a => ({
-          _id: a._id,
-          title: a.title,
-          content: a.content,
-          pinned: a.pinned,
-          author: a.author_id?.display_name || "Unknown",
-          created_at: a.created_at,
-        })),
-      });
-    }
-
-    // ========================================================================
-    // NOTIFICATION ENDPOINTS
-    // ========================================================================
-
-    // GET /user/notifications — get notifications for current user
-    if (pathname === "/api/user/notifications" && req.method === "GET") {
-      const decoded = verifyToken(req);
-      const limit = Math.min(parseInt(req.query?.limit) || 30, 50);
-      const unreadOnly = req.query?.unread === "true";
-
-      const query = { user_id: decoded.id };
-      if (unreadOnly) query.read = false;
-
-      const notifications = await Notification.find(query)
-        .sort({ created_at: -1 })
-        .limit(limit);
-
-      const unreadCount = await Notification.countDocuments({ user_id: decoded.id, read: false });
-
-      return res.status(200).json({
-        notifications: notifications.map(n => ({
-          _id: n._id,
-          type: n.type,
-          title: n.title,
-          message: n.message,
-          link: n.link,
-          read: n.read,
-          created_at: n.created_at,
-        })),
-        unread_count: unreadCount,
-      });
-    }
-
-    // PATCH /user/notifications/read — mark notifications as read
-    if (pathname === "/api/user/notifications/read" && req.method === "PATCH") {
-      const decoded = verifyToken(req);
-      const { notification_ids, all } = req.body || {};
-
-      if (all) {
-        await Notification.updateMany({ user_id: decoded.id, read: false }, { read: true });
-      } else if (notification_ids && Array.isArray(notification_ids)) {
-        await Notification.updateMany(
-          { _id: { $in: notification_ids }, user_id: decoded.id },
-          { read: true }
-        );
-      } else {
-        return res.status(400).json({ error: "Provide notification_ids array or all:true" });
-      }
-
-      const unreadCount = await Notification.countDocuments({ user_id: decoded.id, read: false });
-      return res.status(200).json({ message: "Marked as read", unread_count: unreadCount });
-    }
-
-    // ========================================================================
-    // PUBLIC FAN PROFILE ENDPOINT
-    // ========================================================================
-
-    // GET /fans/:username — public fan profile
-    if (pathname.match(/\/fans\/[a-z0-9_-]+$/) && req.method === "GET") {
-      const username = pathname.split("/").pop();
-      const fan = await User.findOne({ username: username.toLowerCase() });
-      if (!fan) return res.status(404).json({ error: "Fan not found" });
-
-      // Get following clubs
-      const followingClubs = await Club.find({
-        _id: { $in: fan.following_clubs || [] },
-        status: "active",
-      }).select("name slug country league");
-
-      // Activity count and recent
-      const activityCount = await Activity.countDocuments({ user_id: fan._id });
-      const recentActivities = await Activity.find({ user_id: fan._id })
-        .sort({ created_at: -1 })
-        .limit(5)
-        .select("activity_type description points created_at");
-
-      // Referral count
-      const referralCount = await User.countDocuments({ referred_by: fan._id });
-
-      // Rank
-      const rank = await User.countDocuments({ total_score: { $gt: fan.total_score } }) + 1;
-
-      return res.status(200).json({
-        fan: {
-          display_name: fan.display_name,
-          username: fan.username,
-          bio: fan.bio || "",
-          favorite_club: fan.favorite_club || "",
-          level: fan.level,
-          total_score: fan.total_score,
-          badges: fan.badges || [],
-          created_at: fan.created_at,
-          rank,
-          stats: {
-            activity_count: activityCount,
-            following_count: followingClubs.length,
-            referral_count: referralCount,
-            badge_count: (fan.badges || []).length,
-          },
-          following_clubs: followingClubs,
-          recent_activities: recentActivities,
-        },
-      });
-    }
-
-    // ========================================================================
-    // CROSS-ENTITY SEARCH ENDPOINT
-    // ========================================================================
-
-    // GET /search?q=term — search across clubs, experts, articles, fans
-    if (pathname === "/api/search" && req.method === "GET") {
-      const q = (req.query?.q || "").trim();
-      if (!q || q.length < 2) return res.status(400).json({ error: "Search query must be at least 2 characters" });
-
-      const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      const limit = Math.min(parseInt(req.query?.limit) || 10, 20);
-
-      const [clubs, experts, articles, fans] = await Promise.all([
-        Club.find({ status: "active", $or: [{ name: regex }, { country: regex }, { league: regex }] })
-          .select("name slug country league fan_count")
-          .limit(limit),
-        Expert.find({ status: "active", $or: [{ name: regex }, { bio: regex }, { expertise_areas: regex }] })
-          .select("name slug expert_type tier")
-          .limit(limit),
-        Article.find({ status: "published", $or: [{ title: regex }, { summary: regex }, { tags: regex }] })
-          .select("title slug summary tags views")
-          .populate("expert_id", "name slug")
-          .limit(limit),
-        User.find({ $or: [{ display_name: regex }, { username: regex }] })
-          .select("display_name username level total_score")
-          .limit(limit),
-      ]);
-
-      return res.status(200).json({
-        query: q,
-        results: {
-          clubs: clubs.map(c => ({ type: "club", name: c.name, slug: c.slug, country: c.country, league: c.league, fan_count: c.fan_count })),
-          experts: experts.map(e => ({ type: "expert", name: e.name, slug: e.slug, expert_type: e.expert_type, tier: e.tier })),
-          articles: articles.map(a => ({ type: "article", title: a.title, slug: a.slug, summary: a.summary, tags: a.tags, views: a.views, expert: a.expert_id ? { name: a.expert_id.name, slug: a.expert_id.slug } : null })),
-          fans: fans.map(f => ({ type: "fan", display_name: f.display_name, username: f.username, level: f.level, total_score: f.total_score })),
-        },
-        total: clubs.length + experts.length + articles.length + fans.length,
       });
     }
 

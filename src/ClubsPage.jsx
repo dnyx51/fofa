@@ -453,48 +453,7 @@ function EmptyClubsList() {
 
 function ClubDetailView({ club, topFans, endorsements = [] }) {
   const initials = club.name.split(" ").map(w => w[0]).join("").slice(0, 3).toUpperCase();
-  const [isFollowing, setIsFollowing] = useState(false);
-  const [followLoading, setFollowLoading] = useState(false);
-  const [localFanCount, setLocalFanCount] = useState(club.fan_count || 0);
-
-  useEffect(() => {
-    // Check if user follows this club
-    const token = localStorage.getItem("fofaToken");
-    if (token) {
-      fetch(`${API_URL}/user/following`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(d => {
-          const slugs = (d.clubs || []).map(c => c.slug);
-          setIsFollowing(slugs.includes(club.slug));
-        })
-        .catch(() => {});
-    }
-  }, [club.slug]);
-
-  async function toggleFollow() {
-    const token = localStorage.getItem("fofaToken");
-    if (!token) {
-      window.location.hash = "#portal";
-      return;
-    }
-    setFollowLoading(true);
-    try {
-      const method = isFollowing ? "DELETE" : "POST";
-      const res = await fetch(`${API_URL}/clubs/${club.slug}/follow`, {
-        method,
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed");
-      setIsFollowing(!isFollowing);
-      setLocalFanCount(data.club_fan_count ?? localFanCount + (isFollowing ? -1 : 1));
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setFollowLoading(false);
-    }
-  }
-
+  
   function getLevelColor(level) {
     const map = {
       legend: COLORS.red,
@@ -600,28 +559,6 @@ function ClubDetailView({ club, topFans, endorsements = [] }) {
               {club.stadium && ` · ${club.stadium.toUpperCase()}`}
             </p>
           )}
-          <button
-            onClick={toggleFollow}
-            disabled={followLoading}
-            style={{
-              marginTop: 16,
-              padding: "10px 28px",
-              background: isFollowing ? "transparent" : COLORS.green,
-              color: isFollowing ? COLORS.body : COLORS.bg,
-              border: `1px solid ${isFollowing ? COLORS.hairlineStrong : COLORS.green}`,
-              borderRadius: 4,
-              fontFamily: "'DM Mono', monospace",
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              cursor: followLoading ? "wait" : "pointer",
-              opacity: followLoading ? 0.5 : 1,
-              transition: "all 0.2s",
-            }}
-          >
-            {followLoading ? "..." : isFollowing ? "✓ Following" : "Follow Club"}
-          </button>
         </div>
       </div>
       
@@ -645,7 +582,7 @@ function ClubDetailView({ club, topFans, endorsements = [] }) {
             fontWeight: 900,
             color: COLORS.green,
           }}>
-            {localFanCount}
+            {club.fan_count || 0}
           </div>
           <div style={{
             fontSize: 10,

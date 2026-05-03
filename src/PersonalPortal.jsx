@@ -31,14 +31,57 @@ export default function PersonalPortal() {
   const [user, setUser] = useState(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [toast, setToast] = useState(null);
+  const [showCompleteProfile, setShowCompleteProfile] = useState(false);
 
   useEffect(() => {
+    // Check for social_token in URL (returned from OAuth callback)
+    const hash = window.location.hash;
+    const queryStart = hash.indexOf("?");
+    if (queryStart !== -1) {
+      const params = new URLSearchParams(hash.slice(queryStart + 1));
+      const socialToken = params.get("social_token");
+      const isNew = params.get("is_new");
+      const error = params.get("error");
+
+      if (error) {
+        const messages = {
+          google_cancelled: "Google login was cancelled",
+          google_failed: "Google login failed. Please try again.",
+          twitter_cancelled: "X login was cancelled",
+          twitter_failed: "X login failed. Please try again.",
+        };
+        setInitialLoading(false);
+        setCurrentView("login");
+        setTimeout(() => showToast(messages[error] || "Social login failed", "error"), 300);
+        // Clean URL
+        window.history.replaceState(null, "", window.location.pathname + "#portal");
+        return;
+      }
+
+      if (socialToken) {
+        // Store token and load profile
+        localStorage.setItem("fofaToken", socialToken);
+        setToken(socialToken);
+        // Clean URL
+        window.history.replaceState(null, "", window.location.pathname + "#portal");
+        if (isNew === "1") {
+          // New social user - needs to complete profile
+          setShowCompleteProfile(true);
+          setInitialLoading(false);
+          setCurrentView("portal"); // Will be covered by modal
+        } else {
+          // Existing user - load profile normally
+          setTimeout(() => fetchUserProfile(), 100);
+        }
+        return;
+      }
+    }
+
     if (token) {
       fetchUserProfile();
     } else {
       setInitialLoading(false);
       // If they came via referral link, show register view directly
-      const hash = window.location.hash;
       if (hash.startsWith("#join") && hash.includes("ref=")) {
         setCurrentView("register");
       } else {
@@ -54,12 +97,17 @@ export default function PersonalPortal() {
 
   async function fetchUserProfile() {
     try {
+      const currentToken = localStorage.getItem("fofaToken") || token;
       const response = await fetch(`${API_URL}/user/profile`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${currentToken}` },
       });
       if (!response.ok) throw new Error("Session expired");
       const data = await response.json();
       setUser(data.user);
+      // If needs_username - they're social user who hasn't completed profile
+      if (data.user.needs_username) {
+        setShowCompleteProfile(true);
+      }
       setCurrentView("portal");
     } catch (err) {
       console.error(err);
@@ -68,6 +116,14 @@ export default function PersonalPortal() {
     } finally {
       setInitialLoading(false);
     }
+  }
+
+  function handleCompleteProfile(newToken, newUser) {
+    localStorage.setItem("fofaToken", newToken);
+    setToken(newToken);
+    setUser(newUser);
+    setShowCompleteProfile(false);
+    showToast(`Welcome to FOFA, @${newUser.username}! 🎉`, "success");
   }
 
   function logout() {
@@ -142,6 +198,14 @@ export default function PersonalPortal() {
 
       {/* Toast notifications */}
       {toast && <Toast message={toast.message} type={toast.type} />}
+
+      {/* Complete Profile Modal (social login new users) */}
+      {showCompleteProfile && (
+        <CompleteProfileModal
+          token={localStorage.getItem("fofaToken") || token}
+          onComplete={handleCompleteProfile}
+        />
+      )}
 
       {/* Header */}
       <Header token={token} onLogout={logout} />
@@ -491,12 +555,8 @@ function Header({ token, onLogout }) {
           PASSPORT
         </div>
       </a>
-
+      
       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-        <a href="#search" style={{ color: COLORS.body, opacity: 0.5, textDecoration: "none", fontSize: 16, padding: "4px 8px", transition: "opacity 0.2s" }}
-          onMouseEnter={e => e.target.style.opacity = "1"} onMouseLeave={e => e.target.style.opacity = "0.5"}
-          title="Search">🔍</a>
-        {token && <NotificationBell token={token} />}
         <a href="/" style={{
           color: COLORS.body,
           opacity: 0.7,
@@ -518,171 +578,6 @@ function Header({ token, onLogout }) {
           </button>
         )}
       </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// NOTIFICATION BELL COMPONENT
-// ============================================================================
-
-function NotificationBell({ token }) {
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [showPanel, setShowPanel] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const panelRef = React.useRef(null);
-
-  useEffect(() => {
-    fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000); // Poll every 30s
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    function handleClickOutside(e) {
-      if (panelRef.current && !panelRef.current.contains(e.target)) {
-        setShowPanel(false);
-      }
-    }
-    if (showPanel) document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showPanel]);
-
-  async function fetchNotifications() {
-    try {
-      const res = await fetch(`${API_URL}/user/notifications?limit=20`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      setNotifications(data.notifications || []);
-      setUnreadCount(data.unread_count || 0);
-    } catch (err) {
-      // silent
-    }
-  }
-
-  async function markAllRead() {
-    setLoading(true);
-    try {
-      await fetch(`${API_URL}/user/notifications/read`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ all: true }),
-      });
-      setUnreadCount(0);
-      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    } catch (err) {
-      // silent
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function formatTimeAgo(ts) {
-    const diff = Date.now() - new Date(ts).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "now";
-    if (mins < 60) return `${mins}m`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h`;
-    const days = Math.floor(hrs / 24);
-    return `${days}d`;
-  }
-
-  const typeIcons = {
-    new_follower: "👤",
-    endorsement: "🛡️",
-    badge_earned: "🏅",
-    article_published: "📝",
-    club_approved: "🏟️",
-    announcement: "📢",
-    referral_joined: "🤝",
-    level_up: "⬆️",
-  };
-
-  return (
-    <div style={{ position: "relative" }} ref={panelRef}>
-      <button
-        onClick={() => { setShowPanel(!showPanel); if (!showPanel) fetchNotifications(); }}
-        style={{
-          background: "transparent", border: "none", cursor: "pointer", padding: "4px 8px",
-          fontSize: 18, position: "relative", color: COLORS.body, opacity: 0.7, transition: "opacity 0.2s",
-        }}
-        onMouseEnter={e => e.currentTarget.style.opacity = "1"}
-        onMouseLeave={e => e.currentTarget.style.opacity = "0.7"}
-        title="Notifications"
-      >
-        🔔
-        {unreadCount > 0 && (
-          <span style={{
-            position: "absolute", top: 0, right: 2, minWidth: 16, height: 16, borderRadius: 8,
-            background: COLORS.red, color: "#fff", fontSize: 9, fontFamily: "'DM Mono', monospace",
-            fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px",
-          }}>
-            {unreadCount > 9 ? "9+" : unreadCount}
-          </span>
-        )}
-      </button>
-
-      {showPanel && (
-        <div style={{
-          position: "absolute", top: "100%", right: 0, marginTop: 8, width: 360,
-          background: COLORS.bgSoft, border: `1px solid ${COLORS.hairlineStrong}`, borderRadius: 8,
-          boxShadow: "0 8px 40px rgba(0,0,0,0.5)", zIndex: 100, overflow: "hidden",
-          animation: "fadeIn 0.2s ease-out", maxHeight: "70vh", display: "flex", flexDirection: "column",
-        }}>
-          {/* Header */}
-          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${COLORS.hairline}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: 13, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, color: "#F2F5EE", letterSpacing: "0.05em" }}>
-              NOTIFICATIONS {unreadCount > 0 && `(${unreadCount})`}
-            </span>
-            {unreadCount > 0 && (
-              <button onClick={markAllRead} disabled={loading} style={{
-                background: "transparent", border: "none", color: COLORS.green, fontSize: 10,
-                fontFamily: "'DM Mono', monospace", cursor: "pointer", letterSpacing: "0.1em",
-              }}>
-                {loading ? "..." : "MARK ALL READ"}
-              </button>
-            )}
-          </div>
-
-          {/* Notifications list */}
-          <div style={{ overflowY: "auto", flex: 1 }}>
-            {notifications.length === 0 ? (
-              <div style={{ padding: "32px 16px", textAlign: "center" }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>🔔</div>
-                <div style={{ fontSize: 13, color: COLORS.body, opacity: 0.5 }}>No notifications yet</div>
-              </div>
-            ) : (
-              notifications.map((n, i) => (
-                <a
-                  key={n._id || i}
-                  href={n.link || "#"}
-                  onClick={() => setShowPanel(false)}
-                  style={{
-                    display: "flex", gap: 12, padding: "12px 16px", textDecoration: "none", color: "inherit",
-                    borderBottom: `1px solid ${COLORS.hairline}`, transition: "background 0.2s",
-                    background: n.read ? "transparent" : COLORS.greenGlow,
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = COLORS.bgCard}
-                  onMouseLeave={e => e.currentTarget.style.background = n.read ? "transparent" : COLORS.greenGlow}
-                >
-                  <span style={{ fontSize: 20, flexShrink: 0 }}>{typeIcons[n.type] || "📌"}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, color: "#F2F5EE", marginBottom: 2, lineHeight: 1.3 }}>{n.title}</div>
-                    {n.message && <div style={{ fontSize: 11, color: COLORS.body, opacity: 0.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.message}</div>}
-                  </div>
-                  <span style={{ fontSize: 9, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.4, flexShrink: 0 }}>
-                    {formatTimeAgo(n.created_at)}
-                  </span>
-                </a>
-              ))
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1016,6 +911,29 @@ function AuthForm({ type, onSuccess, onError, onSwitchView }) {
       </div>
 
       <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {/* Social login buttons */}
+        <SocialLoginButtons />
+        
+        {/* Divider */}
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+        }}>
+          <div style={{ flex: 1, height: 1, background: COLORS.hairline }} />
+          <span style={{
+            fontSize: 11,
+            fontFamily: "'DM Mono', monospace",
+            color: COLORS.body,
+            opacity: 0.5,
+            letterSpacing: "0.15em",
+            textTransform: "uppercase",
+          }}>
+            or
+          </span>
+          <div style={{ flex: 1, height: 1, background: COLORS.hairline }} />
+        </div>
+
         {type === "register" && referrer && (
           <div style={{
             background: COLORS.greenGlow,
@@ -1190,6 +1108,333 @@ function AuthForm({ type, onSuccess, onError, onSwitchView }) {
 // FORM FIELD
 // ============================================================================
 
+// ============================================================================
+// SOCIAL LOGIN BUTTONS
+// ============================================================================
+
+const API_URL_SOCIAL = import.meta.env.VITE_API_URL || "https://fofa.lol/api";
+
+function SocialLoginButtons() {
+  const googleConfigured = true; // Always show - backend handles missing config gracefully
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Google */}
+      <a
+        href={`${API_URL_SOCIAL}/auth/google`}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 12,
+          background: "#FFFFFF",
+          color: "#1F1F1F",
+          border: "1px solid #DADCE0",
+          borderRadius: 4,
+          padding: "12px 20px",
+          fontFamily: "'DM Mono', monospace",
+          fontSize: 13,
+          fontWeight: 700,
+          letterSpacing: "0.05em",
+          textDecoration: "none",
+          transition: "all 0.2s",
+          cursor: "pointer",
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = "#F8F8F8"}
+        onMouseLeave={e => e.currentTarget.style.background = "#FFFFFF"}
+      >
+        {/* Google icon SVG */}
+        <svg width="18" height="18" viewBox="0 0 24 24">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Continue with Google
+      </a>
+
+      {/* X / Twitter */}
+      <a
+        href={`${API_URL_SOCIAL}/auth/twitter`}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 12,
+          background: "#000000",
+          color: "#FFFFFF",
+          border: "1px solid #333",
+          borderRadius: 4,
+          padding: "12px 20px",
+          fontFamily: "'DM Mono', monospace",
+          fontSize: 13,
+          fontWeight: 700,
+          letterSpacing: "0.05em",
+          textDecoration: "none",
+          transition: "all 0.2s",
+          cursor: "pointer",
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = "#1a1a1a"}
+        onMouseLeave={e => e.currentTarget.style.background = "#000000"}
+      >
+        {/* X icon */}
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.747l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+        </svg>
+        Continue with X
+      </a>
+    </div>
+  );
+}
+
+// ============================================================================
+// COMPLETE PROFILE MODAL (shown after first social login)
+// ============================================================================
+
+function CompleteProfileModal({ token, onComplete }) {
+  const [username, setUsername] = useState("");
+  const [favoriteClub, setFavoriteClub] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [usernameAvailable, setUsernameAvailable] = useState(null);
+  const [checkingUsername, setCheckingUsername] = useState(false);
+
+  // Debounce username check
+  useEffect(() => {
+    if (username.length < 3) {
+      setUsernameAvailable(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setCheckingUsername(true);
+      try {
+        // We'll use the register endpoint error to check availability
+        // Simple check: just show green if valid format
+        const isValid = /^[a-z0-9_]{3,20}$/.test(username.toLowerCase());
+        setUsernameAvailable(isValid ? "valid_format" : "invalid_format");
+      } catch (e) {}
+      finally { setCheckingUsername(false); }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [username]);
+
+  async function handleComplete(e) {
+    e.preventDefault();
+    if (!username || username.length < 3) {
+      setError("Username must be at least 3 characters");
+      return;
+    }
+    if (!/^[a-z0-9_]+$/.test(username.toLowerCase())) {
+      setError("Letters, numbers, and underscores only");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const API_URL = import.meta.env.VITE_API_URL || "https://fofa.lol/api";
+      const response = await fetch(`${API_URL}/auth/social/complete`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          username: username.toLowerCase(),
+          favorite_club: favoriteClub,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to complete profile");
+      }
+
+      onComplete(data.token, data.user);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(8, 12, 8, 0.95)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 1000,
+      padding: 20,
+    }}>
+      <div style={{
+        background: "#0E140E",
+        border: `1px solid ${COLORS.green}`,
+        borderRadius: 8,
+        padding: 40,
+        maxWidth: 440,
+        width: "100%",
+        boxShadow: `0 0 60px rgba(26, 255, 110, 0.15)`,
+        animation: "fadeIn 0.3s ease-out",
+      }}>
+        {/* Header */}
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>⚽</div>
+          <h2 style={{
+            fontFamily: "'Barlow Condensed', sans-serif",
+            fontSize: 32,
+            fontWeight: 900,
+            color: "#F2F5EE",
+            margin: "0 0 8px",
+            letterSpacing: "-0.01em",
+          }}>
+            Almost there!
+          </h2>
+          <p style={{ color: COLORS.body, opacity: 0.7, margin: 0, fontSize: 14 }}>
+            Pick a username to complete your FOFA profile
+          </p>
+        </div>
+
+        <form onSubmit={handleComplete} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Username */}
+          <div>
+            <label style={{
+              display: "block",
+              fontSize: 11,
+              fontFamily: "'DM Mono', monospace",
+              color: COLORS.body,
+              opacity: 0.85,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              marginBottom: 6,
+            }}>
+              Username *
+            </label>
+            <div style={{ position: "relative" }}>
+              <input
+                type="text"
+                value={username}
+                onChange={e => setUsername(e.target.value.toLowerCase())}
+                placeholder="footy_fan_2026"
+                maxLength={20}
+                autoFocus
+                style={{
+                  width: "100%",
+                  background: COLORS.bg,
+                  border: `1px solid ${error ? COLORS.red : username.length >= 3 ? COLORS.green : COLORS.hairlineStrong}`,
+                  color: "#F2F5EE",
+                  padding: "12px 40px 12px 14px",
+                  borderRadius: 4,
+                  fontSize: 14,
+                  fontFamily: "'Crimson Pro', serif",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+              {username.length >= 3 && (
+                <div style={{
+                  position: "absolute",
+                  right: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  fontSize: 14,
+                }}>
+                  {checkingUsername ? "..." : "✓"}
+                </div>
+              )}
+            </div>
+            <div style={{
+              fontSize: 11,
+              color: COLORS.body,
+              opacity: 0.5,
+              marginTop: 4,
+              fontStyle: "italic",
+            }}>
+              Letters, numbers, underscores only
+            </div>
+          </div>
+
+          {/* Favorite Club */}
+          <div>
+            <label style={{
+              display: "block",
+              fontSize: 11,
+              fontFamily: "'DM Mono', monospace",
+              color: COLORS.body,
+              opacity: 0.85,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              marginBottom: 6,
+            }}>
+              Favorite Club (optional)
+            </label>
+            <input
+              type="text"
+              value={favoriteClub}
+              onChange={e => setFavoriteClub(e.target.value)}
+              placeholder="e.g., Arsenal, Stocksbridge Park Steels..."
+              style={{
+                width: "100%",
+                background: COLORS.bg,
+                border: `1px solid ${COLORS.hairlineStrong}`,
+                color: "#F2F5EE",
+                padding: "12px 14px",
+                borderRadius: 4,
+                fontSize: 14,
+                fontFamily: "'Crimson Pro', serif",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+              onFocus={e => e.target.style.borderColor = COLORS.green}
+              onBlur={e => e.target.style.borderColor = COLORS.hairlineStrong}
+            />
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div style={{
+              background: "rgba(255, 71, 87, 0.1)",
+              border: `1px solid ${COLORS.red}`,
+              color: COLORS.red,
+              padding: 12,
+              borderRadius: 4,
+              fontSize: 13,
+            }}>
+              {error}
+            </div>
+          )}
+
+          {/* Submit */}
+          <button
+            type="submit"
+            disabled={loading || username.length < 3}
+            style={{
+              marginTop: 8,
+              background: COLORS.green,
+              color: COLORS.bg,
+              border: "none",
+              padding: "14px 28px",
+              fontSize: 13,
+              fontFamily: "'DM Mono', monospace",
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              fontWeight: 700,
+              borderRadius: 4,
+              cursor: (loading || username.length < 3) ? "not-allowed" : "pointer",
+              opacity: (loading || username.length < 3) ? 0.5 : 1,
+            }}
+          >
+            {loading ? "Saving..." : "Let's Go →"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function FormField({ label, name, value, onChange, onBlur, error, placeholder, type = "text", hint, autoFocus, suffix }) {
   return (
     <div>
@@ -1284,9 +1529,6 @@ function Dashboard({ user, token, onProfileUpdate, showToast }) {
 
   const tabs = [
     { id: "passport", label: "Passport" },
-    { id: "myclubs", label: "⚽ My Clubs" },
-    { id: "feed", label: "📡 Feed" },
-    { id: "badges", label: "🏅 Badges" },
     { id: "leaderboard", label: "🏆 Leaderboard" },
     { id: "referrals", label: "🎁 Refer Friends" },
     { id: "activities", label: "Record Activity" },
@@ -1333,16 +1575,7 @@ function Dashboard({ user, token, onProfileUpdate, showToast }) {
       {/* Tab content with fade */}
       <div key={activeTab} className="fade-in">
         {activeTab === "passport" && (
-          <PassportTab user={user} loyaltyData={loyaltyData} loading={loading} token={token} />
-        )}
-        {activeTab === "myclubs" && (
-          <MyClubsTab token={token} showToast={showToast} />
-        )}
-        {activeTab === "feed" && (
-          <ActivityFeedTab showToast={showToast} />
-        )}
-        {activeTab === "badges" && (
-          <BadgesTab token={token} showToast={showToast} />
+          <PassportTab user={user} loyaltyData={loyaltyData} loading={loading} />
         )}
         {activeTab === "leaderboard" && (
           <LeaderboardTab token={token} user={user} showToast={showToast} />
@@ -1372,17 +1605,7 @@ function Dashboard({ user, token, onProfileUpdate, showToast }) {
 // PASSPORT TAB
 // ============================================================================
 
-function PassportTab({ user, loyaltyData, loading, token }) {
-  const [passportData, setPassportData] = useState(null);
-
-  useEffect(() => {
-    if (token) {
-      fetch(`${API_URL}/user/passport`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(d => setPassportData(d.passport))
-        .catch(() => {});
-    }
-  }, [token]);
+function PassportTab({ user, loyaltyData, loading }) {
   if (loading || !loyaltyData) {
     return <PassportSkeleton />;
   }
@@ -1661,91 +1884,6 @@ function PassportTab({ user, loyaltyData, loading, token }) {
             ))}
           </div>
         </div>
-
-        {/* Quick Stats Row */}
-        {passportData && (
-          <div style={{ padding: "0 32px 24px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-            {[
-              { label: "RANK", value: `#${passportData.rank}`, color: COLORS.gold },
-              { label: "CLUBS", value: passportData.stats.following_count, color: COLORS.teal },
-              { label: "BADGES", value: passportData.stats.badge_count, color: COLORS.green },
-              { label: "REFERRALS", value: passportData.stats.referral_count, color: COLORS.gold },
-            ].map((s, i) => (
-              <div key={i} style={{
-                background: COLORS.bg,
-                border: `1px solid ${COLORS.hairline}`,
-                borderRadius: 4,
-                padding: "12px 10px",
-                textAlign: "center",
-              }}>
-                <div style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", opacity: 0.5, letterSpacing: "0.15em", marginBottom: 4 }}>{s.label}</div>
-                <div style={{ fontSize: 22, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, color: s.color }}>{s.value}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Badges Preview */}
-        {passportData && passportData.badges && passportData.badges.length > 0 && (
-          <div style={{ padding: "0 32px 24px" }}>
-            <div style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.6, letterSpacing: "0.2em", marginBottom: 12 }}>
-              BADGES EARNED
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {passportData.badges.map((b, i) => (
-                <div key={i} style={{
-                  background: COLORS.bgCard,
-                  border: `1px solid ${COLORS.hairline}`,
-                  borderRadius: 4,
-                  padding: "8px 14px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  fontSize: 12,
-                  fontFamily: "'DM Mono', monospace",
-                  color: COLORS.body,
-                }}>
-                  <span style={{ fontSize: 18 }}>{b.icon}</span>
-                  <span>{b.name}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Following Clubs Preview */}
-        {passportData && passportData.following_clubs && passportData.following_clubs.length > 0 && (
-          <div style={{ padding: "0 32px 24px" }}>
-            <div style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.6, letterSpacing: "0.2em", marginBottom: 12 }}>
-              FOLLOWING
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {passportData.following_clubs.map((c, i) => (
-                <a key={i} href={`#clubs/${c.slug}`} style={{
-                  background: COLORS.bgCard,
-                  border: `1px solid ${COLORS.hairline}`,
-                  borderRadius: 4,
-                  padding: "8px 14px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  fontSize: 12,
-                  fontFamily: "'DM Mono', monospace",
-                  color: COLORS.teal,
-                  textDecoration: "none",
-                  transition: "border-color 0.2s",
-                }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = COLORS.teal}
-                onMouseLeave={e => e.currentTarget.style.borderColor = COLORS.hairline}
-                >
-                  <span>🏟️</span>
-                  <span>{c.name}</span>
-                  <span style={{ fontSize: 10, color: COLORS.body, opacity: 0.5 }}>{c.country}</span>
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Footer strip */}
         <div style={{
@@ -3273,543 +3411,6 @@ function OnboardingCard({ icon, subtitle, title, description, highlight, customC
           Skip
         </button>
       </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// REFERRALS TAB
-// ============================================================================
-
-// ============================================================================
-// MY CLUBS TAB
-// ============================================================================
-
-function MyClubsTab({ token, showToast }) {
-  const [followingClubs, setFollowingClubs] = useState([]);
-  const [allClubs, setAllClubs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [showDiscover, setShowDiscover] = useState(false);
-  const [actionLoading, setActionLoading] = useState(null);
-
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  async function fetchData() {
-    setLoading(true);
-    try {
-      const [followRes, allRes] = await Promise.all([
-        fetch(`${API_URL}/user/following`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_URL}/clubs`),
-      ]);
-      const followData = await followRes.json();
-      const allData = await allRes.json();
-      setFollowingClubs(followData.clubs || []);
-      setAllClubs(allData.clubs || []);
-    } catch (err) {
-      showToast("Could not load clubs", "error");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleFollow(club) {
-    setActionLoading(club.slug);
-    try {
-      const res = await fetch(`${API_URL}/clubs/${club.slug}/follow`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const d = await res.json();
-        throw new Error(d.error || "Failed");
-      }
-      showToast(`Now following ${club.name}`, "success");
-      await fetchData();
-    } catch (err) {
-      showToast(err.message, "error");
-    } finally {
-      setActionLoading(null);
-    }
-  }
-
-  async function handleUnfollow(club) {
-    setActionLoading(club.slug);
-    try {
-      const res = await fetch(`${API_URL}/clubs/${club.slug}/follow`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Failed to unfollow");
-      showToast(`Unfollowed ${club.name}`, "success");
-      await fetchData();
-    } catch (err) {
-      showToast(err.message, "error");
-    } finally {
-      setActionLoading(null);
-    }
-  }
-
-  const followingSlugs = new Set(followingClubs.map(c => c.slug));
-  const discoverClubs = allClubs
-    .filter(c => !followingSlugs.has(c.slug))
-    .filter(c => !searchQuery || c.name.toLowerCase().includes(searchQuery.toLowerCase()) || (c.country || "").toLowerCase().includes(searchQuery.toLowerCase()));
-
-  if (loading) {
-    return <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>{[1,2,3].map(i => <Skeleton key={i} height={100} />)}</div>;
-  }
-
-  return (
-    <div style={{ maxWidth: 900 }}>
-      {/* Header */}
-      <div style={{ marginBottom: 32 }}>
-        <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.gold, letterSpacing: "0.25em", marginBottom: 12 }}>
-          — YOUR CLUBS
-        </div>
-        <h2 style={{ color: "#F2F5EE", fontFamily: "'Barlow Condensed', sans-serif", fontSize: "clamp(28px, 5vw, 40px)", fontWeight: 900, margin: "0 0 8px", letterSpacing: "-0.01em" }}>
-          Clubs You Follow
-        </h2>
-        <p style={{ color: COLORS.body, opacity: 0.7, margin: 0 }}>
-          Follow clubs to show your support and stay connected with their journey on FOFA.
-        </p>
-      </div>
-
-      {/* Following clubs */}
-      {followingClubs.length === 0 ? (
-        <div style={{
-          background: COLORS.bgCard,
-          border: `1px solid ${COLORS.hairline}`,
-          borderRadius: 8,
-          padding: "48px 32px",
-          textAlign: "center",
-          marginBottom: 32,
-        }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>⚽</div>
-          <div style={{ color: "#F2F5EE", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, fontWeight: 900, marginBottom: 8 }}>
-            No Clubs Yet
-          </div>
-          <p style={{ color: COLORS.body, opacity: 0.7, marginBottom: 24 }}>
-            Discover clubs on FOFA and follow the ones you support.
-          </p>
-          <button className="btn-primary" onClick={() => setShowDiscover(true)}>
-            Discover Clubs
-          </button>
-        </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16, marginBottom: 32 }}>
-          {followingClubs.map(club => (
-            <div key={club.slug} style={{
-              background: COLORS.bgCard,
-              border: `1px solid ${COLORS.hairline}`,
-              borderRadius: 8,
-              padding: 24,
-              transition: "all 0.2s",
-              position: "relative",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = COLORS.teal; e.currentTarget.style.transform = "translateY(-2px)"; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = COLORS.hairline; e.currentTarget.style.transform = "translateY(0)"; }}
-            >
-              <a href={`#clubs/${club.slug}`} style={{ textDecoration: "none", color: "inherit" }}>
-                <div style={{ fontSize: 20, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, color: "#F2F5EE", marginBottom: 8 }}>
-                  {club.name}
-                </div>
-                <div style={{ fontSize: 12, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.6, marginBottom: 4 }}>
-                  {club.league}{club.country ? ` · ${club.country}` : ""}
-                </div>
-                {club.stadium && (
-                  <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.4 }}>
-                    🏟️ {club.stadium}
-                  </div>
-                )}
-                <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.teal, marginTop: 8 }}>
-                  {club.fan_count || 0} fans on FOFA
-                </div>
-              </a>
-              <button
-                onClick={(e) => { e.preventDefault(); handleUnfollow(club); }}
-                disabled={actionLoading === club.slug}
-                style={{
-                  position: "absolute",
-                  top: 16,
-                  right: 16,
-                  background: "transparent",
-                  border: `1px solid ${COLORS.red}40`,
-                  color: COLORS.red,
-                  padding: "4px 12px",
-                  borderRadius: 4,
-                  fontSize: 10,
-                  fontFamily: "'DM Mono', monospace",
-                  cursor: "pointer",
-                  opacity: actionLoading === club.slug ? 0.5 : 0.7,
-                  transition: "all 0.2s",
-                }}
-                onMouseEnter={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.background = COLORS.red + "20"; }}
-                onMouseLeave={e => { e.currentTarget.style.opacity = "0.7"; e.currentTarget.style.background = "transparent"; }}
-              >
-                {actionLoading === club.slug ? "..." : "Unfollow"}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Discover toggle */}
-      <button
-        className="btn-ghost"
-        onClick={() => setShowDiscover(!showDiscover)}
-        style={{ marginBottom: 24 }}
-      >
-        {showDiscover ? "Hide Discover" : "Discover More Clubs"}
-      </button>
-
-      {/* Discover section */}
-      {showDiscover && (
-        <div>
-          <input
-            type="text"
-            placeholder="Search clubs by name or country..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "12px 16px",
-              background: COLORS.bgCard,
-              border: `1px solid ${COLORS.hairline}`,
-              borderRadius: 4,
-              color: "#F2F5EE",
-              fontFamily: "'Crimson Pro', serif",
-              fontSize: 16,
-              marginBottom: 16,
-              outline: "none",
-            }}
-            onFocus={e => e.target.style.borderColor = COLORS.green}
-            onBlur={e => e.target.style.borderColor = COLORS.hairline}
-          />
-          {discoverClubs.length === 0 ? (
-            <div style={{ color: COLORS.body, opacity: 0.5, padding: 24, textAlign: "center" }}>
-              {searchQuery ? "No clubs match your search." : "You're following all clubs!"}
-            </div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
-              {discoverClubs.map(club => (
-                <div key={club.slug} style={{
-                  background: COLORS.bgCard,
-                  border: `1px solid ${COLORS.hairline}`,
-                  borderRadius: 8,
-                  padding: "16px 20px",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 16,
-                }}>
-                  <a href={`#clubs/${club.slug}`} style={{ textDecoration: "none", color: "inherit", flex: 1 }}>
-                    <div style={{ fontSize: 16, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, color: "#F2F5EE" }}>
-                      {club.name}
-                    </div>
-                    <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.5 }}>
-                      {club.league}{club.country ? ` · ${club.country}` : ""}
-                    </div>
-                  </a>
-                  <button
-                    onClick={() => handleFollow(club)}
-                    disabled={actionLoading === club.slug}
-                    className="btn-primary"
-                    style={{ padding: "6px 16px", fontSize: 11, whiteSpace: "nowrap" }}
-                  >
-                    {actionLoading === club.slug ? "..." : "Follow"}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ============================================================================
-// ACTIVITY FEED TAB
-// ============================================================================
-
-function ActivityFeedTab({ showToast }) {
-  const [feed, setFeed] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
-  const [nextBefore, setNextBefore] = useState(null);
-
-  useEffect(() => {
-    fetchFeed();
-  }, []);
-
-  async function fetchFeed(before = null) {
-    if (before) setLoadingMore(true); else setLoading(true);
-    try {
-      let url = `${API_URL}/feed?limit=20`;
-      if (before) url += `&before=${encodeURIComponent(before)}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (before) {
-        setFeed(prev => [...prev, ...(data.feed || [])]);
-      } else {
-        setFeed(data.feed || []);
-      }
-      setHasMore(data.has_more);
-      setNextBefore(data.next_before);
-    } catch (err) {
-      showToast("Could not load feed", "error");
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  }
-
-  function formatTimeAgo(ts) {
-    const diff = Date.now() - new Date(ts).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    const days = Math.floor(hrs / 24);
-    if (days < 7) return `${days}d ago`;
-    return new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-  }
-
-  const typeColors = {
-    activity: COLORS.green,
-    endorsement: COLORS.gold,
-    article: COLORS.teal,
-    club_joined: COLORS.green,
-  };
-
-  if (loading) {
-    return <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>{[1,2,3,4,5].map(i => <Skeleton key={i} height={70} />)}</div>;
-  }
-
-  return (
-    <div style={{ maxWidth: 800 }}>
-      {/* Header */}
-      <div style={{ marginBottom: 32 }}>
-        <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.gold, letterSpacing: "0.25em", marginBottom: 12 }}>
-          — PLATFORM ACTIVITY
-        </div>
-        <h2 style={{ color: "#F2F5EE", fontFamily: "'Barlow Condensed', sans-serif", fontSize: "clamp(28px, 5vw, 40px)", fontWeight: 900, margin: "0 0 8px", letterSpacing: "-0.01em" }}>
-          Activity Feed
-        </h2>
-        <p style={{ color: COLORS.body, opacity: 0.7, margin: 0 }}>
-          What's happening across FOFA right now.
-        </p>
-      </div>
-
-      {feed.length === 0 ? (
-        <div style={{
-          background: COLORS.bgCard,
-          border: `1px solid ${COLORS.hairline}`,
-          borderRadius: 8,
-          padding: "48px 32px",
-          textAlign: "center",
-        }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>📡</div>
-          <div style={{ color: "#F2F5EE", fontFamily: "'Barlow Condensed', sans-serif", fontSize: 24, fontWeight: 900 }}>
-            No Activity Yet
-          </div>
-          <p style={{ color: COLORS.body, opacity: 0.7 }}>
-            The feed will light up as fans, clubs, and experts start using FOFA.
-          </p>
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {feed.map((item, i) => (
-            <div key={i} style={{
-              background: COLORS.bgCard,
-              border: `1px solid ${COLORS.hairline}`,
-              borderRadius: 6,
-              padding: "16px 20px",
-              display: "flex",
-              gap: 16,
-              alignItems: "flex-start",
-              animation: `fadeIn 0.3s ease-out ${Math.min(i * 0.05, 0.5)}s forwards`,
-              opacity: 0,
-              transition: "border-color 0.2s",
-            }}
-            onMouseEnter={e => e.currentTarget.style.borderColor = typeColors[item.type] || COLORS.hairline}
-            onMouseLeave={e => e.currentTarget.style.borderColor = COLORS.hairline}
-            >
-              <div style={{ fontSize: 24, flexShrink: 0, width: 36, textAlign: "center" }}>
-                {item.icon}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontFamily: "'Crimson Pro', serif", color: "#F2F5EE", marginBottom: 4 }}>
-                  {item.title}
-                </div>
-                {item.subtitle && (
-                  <div style={{ fontSize: 13, color: COLORS.body, opacity: 0.6, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {item.subtitle}
-                  </div>
-                )}
-                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.4, letterSpacing: "0.1em" }}>
-                    {formatTimeAgo(item.timestamp)}
-                  </span>
-                  {item.points && (
-                    <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: COLORS.green, letterSpacing: "0.1em" }}>
-                      +{item.points} pts
-                    </span>
-                  )}
-                  {item.tags && item.tags.length > 0 && item.tags.slice(0, 3).map((tag, ti) => (
-                    <span key={ti} style={{ fontSize: 9, fontFamily: "'DM Mono', monospace", color: COLORS.teal, background: COLORS.teal + "15", padding: "2px 8px", borderRadius: 3 }}>
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <div style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: typeColors[item.type] || COLORS.body, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.1em", flexShrink: 0 }}>
-                {item.type.replace("_", " ")}
-              </div>
-            </div>
-          ))}
-
-          {/* Load more */}
-          {hasMore && (
-            <div style={{ textAlign: "center", paddingTop: 16 }}>
-              <button
-                className="btn-ghost"
-                onClick={() => fetchFeed(nextBefore)}
-                disabled={loadingMore}
-              >
-                {loadingMore ? "Loading..." : "Load More"}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ============================================================================
-// BADGES TAB
-// ============================================================================
-
-function BadgesTab({ token, showToast }) {
-  const [badges, setBadges] = useState([]);
-  const [available, setAvailable] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchBadges();
-  }, []);
-
-  async function fetchBadges() {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/user/badges`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      setBadges(data.badges || []);
-      setAvailable(data.available_badges || []);
-    } catch (err) {
-      showToast("Could not load badges", "error");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const earnedIds = new Set(badges.map(b => b.badge_id));
-  const categories = ["activity", "clubs", "community", "level"];
-  const categoryLabels = { activity: "Activity", clubs: "Clubs", community: "Community", level: "Level Milestones" };
-  const categoryIcons = { activity: "⚡", clubs: "⚽", community: "🤝", level: "⭐" };
-
-  if (loading) {
-    return <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>{[1,2,3].map(i => <Skeleton key={i} height={120} />)}</div>;
-  }
-
-  return (
-    <div style={{ maxWidth: 900 }}>
-      {/* Header */}
-      <div style={{ marginBottom: 32 }}>
-        <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.gold, letterSpacing: "0.25em", marginBottom: 12 }}>
-          — ACHIEVEMENTS
-        </div>
-        <h2 style={{ color: "#F2F5EE", fontFamily: "'Barlow Condensed', sans-serif", fontSize: "clamp(28px, 5vw, 40px)", fontWeight: 900, margin: "0 0 8px", letterSpacing: "-0.01em" }}>
-          Your Badges
-        </h2>
-        <p style={{ color: COLORS.body, opacity: 0.7, margin: 0 }}>
-          Earn badges by being active on FOFA. <strong style={{ color: COLORS.green }}>{badges.length}</strong> of <strong>{available.length}</strong> earned.
-        </p>
-      </div>
-
-      {/* Progress bar */}
-      <div style={{ marginBottom: 40 }}>
-        <div style={{ height: 8, background: COLORS.bgCard, borderRadius: 4, overflow: "hidden", border: `1px solid ${COLORS.hairline}` }}>
-          <div style={{
-            height: "100%",
-            width: `${available.length > 0 ? (badges.length / available.length) * 100 : 0}%`,
-            background: `linear-gradient(90deg, ${COLORS.green}, ${COLORS.gold})`,
-            transition: "width 1s ease-out",
-            boxShadow: `0 0 12px ${COLORS.green}`,
-          }} />
-        </div>
-      </div>
-
-      {/* Badge categories */}
-      {categories.map(cat => {
-        const catBadges = available.filter(b => b.category === cat);
-        if (catBadges.length === 0) return null;
-        return (
-          <div key={cat} style={{ marginBottom: 40 }}>
-            <div style={{ fontSize: 12, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.6, letterSpacing: "0.2em", marginBottom: 16, textTransform: "uppercase" }}>
-              {categoryIcons[cat]} {categoryLabels[cat]}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
-              {catBadges.map(def => {
-                const earned = earnedIds.has(def.badge_id);
-                const earnedBadge = badges.find(b => b.badge_id === def.badge_id);
-                return (
-                  <div key={def.badge_id} style={{
-                    background: earned ? COLORS.bgCard : COLORS.bg,
-                    border: `1px solid ${earned ? COLORS.green + "40" : COLORS.hairline}`,
-                    borderRadius: 8,
-                    padding: 20,
-                    textAlign: "center",
-                    opacity: earned ? 1 : 0.4,
-                    transition: "all 0.3s",
-                    position: "relative",
-                  }}
-                  onMouseEnter={e => { if (earned) { e.currentTarget.style.borderColor = COLORS.green; e.currentTarget.style.transform = "translateY(-3px)"; }}}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = earned ? COLORS.green + "40" : COLORS.hairline; e.currentTarget.style.transform = "translateY(0)"; }}
-                  >
-                    {earned && (
-                      <div style={{ position: "absolute", top: 8, right: 10, fontSize: 10, color: COLORS.green, fontFamily: "'DM Mono', monospace" }}>
-                        ✓
-                      </div>
-                    )}
-                    <div style={{ fontSize: 36, marginBottom: 12, filter: earned ? "none" : "grayscale(1)" }}>
-                      {def.icon}
-                    </div>
-                    <div style={{ fontSize: 14, fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, color: earned ? "#F2F5EE" : COLORS.body, marginBottom: 4 }}>
-                      {def.name}
-                    </div>
-                    <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", color: COLORS.body, opacity: 0.6 }}>
-                      {def.description}
-                    </div>
-                    {earned && earnedBadge && (
-                      <div style={{ fontSize: 9, fontFamily: "'DM Mono', monospace", color: COLORS.green, opacity: 0.6, marginTop: 8, letterSpacing: "0.1em" }}>
-                        EARNED {new Date(earnedBadge.earned_at).toLocaleDateString("en-GB")}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }

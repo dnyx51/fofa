@@ -445,6 +445,70 @@ const reportSchema = new mongoose.Schema({
 const Report = mongoose.models.Report || mongoose.model("Report", reportSchema);
 
 // ============================================================================
+// ANNOUNCEMENT SCHEMA (club announcements)
+// ============================================================================
+
+const announcementSchema = new mongoose.Schema({
+  club_id: { type: mongoose.Schema.Types.ObjectId, ref: "Club", required: true, index: true },
+  author_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  title: { type: String, required: true, trim: true },
+  content: { type: String, required: true },
+  pinned: { type: Boolean, default: false },
+  created_at: { type: Date, default: Date.now, index: true },
+  updated_at: { type: Date, default: Date.now },
+});
+
+const Announcement = mongoose.models.Announcement || mongoose.model("Announcement", announcementSchema);
+
+// ============================================================================
+// NOTIFICATION SCHEMA
+// ============================================================================
+
+const notificationSchema = new mongoose.Schema({
+  user_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
+  type: {
+    type: String,
+    required: true,
+    enum: ["new_follower", "endorsement", "badge_earned", "article_published", "club_approved", "announcement", "referral_joined", "level_up"],
+  },
+  title: { type: String, required: true },
+  message: { type: String, default: "" },
+  link: { type: String, default: "" },
+  read: { type: Boolean, default: false, index: true },
+  created_at: { type: Date, default: Date.now, index: true },
+});
+
+const Notification = mongoose.models.Notification || mongoose.model("Notification", notificationSchema);
+
+// Helper to create a notification
+async function createNotification(userId, type, title, message = "", link = "") {
+  try {
+    await Notification.create({ user_id: userId, type, title, message, link });
+  } catch (err) {
+    console.error("Notification create error:", err.message);
+  }
+}
+
+// Helper to notify all followers of a club
+async function notifyClubFollowers(clubId, type, title, message = "", link = "") {
+  try {
+    const followers = await User.find({ following_clubs: clubId }).select("_id");
+    const notifications = followers.map(f => ({
+      user_id: f._id,
+      type,
+      title,
+      message,
+      link,
+    }));
+    if (notifications.length > 0) {
+      await Notification.insertMany(notifications);
+    }
+  } catch (err) {
+    console.error("Bulk notification error:", err.message);
+  }
+}
+
+// ============================================================================
 // BADGE DEFINITIONS & HELPERS
 // ============================================================================
 
@@ -2109,7 +2173,17 @@ export default async function handler(req, res) {
       expert.endorsement_count += 1;
       expert.contribution_score += 100;
       await expert.save();
-      
+
+      // Notify club admins of new endorsement
+      if (club_id) {
+        const endorsedClub = await Club.findById(club_id);
+        if (endorsedClub) {
+          for (const adminId of endorsedClub.admin_user_ids || []) {
+            await createNotification(adminId, "endorsement", `${expert.name} endorsed ${endorsedClub.name}`, endorsement_text.slice(0, 100), `#clubs/${endorsedClub.slug}`);
+          }
+        }
+      }
+
       return res.status(201).json({
         message: "Endorsement submitted",
         endorsement: {
@@ -2912,6 +2986,11 @@ export default async function handler(req, res) {
       // Award badge: first club followed
       await checkAndAwardBadge(user, "first_follow", "First Follow", "Followed your first club", "⚽");
 
+      // Notify club admins of new follower
+      for (const adminId of club.admin_user_ids || []) {
+        await createNotification(adminId, "new_follower", `${user.display_name} followed ${club.name}`, "", `#clubs/${club.slug}`);
+      }
+
       return res.status(200).json({
         message: `Now following ${club.name}`,
         following_count: user.following_clubs.length,
@@ -3176,6 +3255,278 @@ export default async function handler(req, res) {
             created_at: a.created_at,
           })),
         },
+      });
+    }
+
+    // ========================================================================
+    // CLUB DASHBOARD ENDPOINTS
+    // ========================================================================
+
+    // GET /clubs/my-club — get club managed by current user
+    if (pathname === "/api/clubs/my-club" && req.method === "GET") {
+      const decoded = verifyToken(req);
+      const club = await Club.findOne({ admin_user_ids: decoded.id, status: "active" });
+      if (!club) return res.status(404).json({ error: "You don't manage any club" });
+
+      // Get follower details
+      const followers = await User.find({ following_clubs: club._id })
+        .select("display_name username total_score level created_at")
+        .sort({ total_score: -1 })
+        .limit(100);
+
+      // Get endorsement count
+      const endorsementCount = await Endorsement.countDocuments({ club_id: club._id });
+
+      // Get recent announcements
+      const announcements = await Announcement.find({ club_id: club._id })
+        .sort({ pinned: -1, created_at: -1 })
+        .limit(20)
+        .populate("author_id", "display_name");
+
+      return res.status(200).json({
+        club,
+        followers,
+        stats: {
+          fan_count: club.fan_count || 0,
+          endorsement_count: endorsementCount,
+          follower_count: followers.length,
+          announcement_count: announcements.length,
+        },
+        announcements: announcements.map(a => ({
+          _id: a._id,
+          title: a.title,
+          content: a.content,
+          pinned: a.pinned,
+          author: a.author_id?.display_name || "Unknown",
+          created_at: a.created_at,
+        })),
+      });
+    }
+
+    // PATCH /clubs/my-club — update club profile (club admin only)
+    if (pathname === "/api/clubs/my-club" && req.method === "PATCH") {
+      const decoded = verifyToken(req);
+      const club = await Club.findOne({ admin_user_ids: decoded.id, status: "active" });
+      if (!club) return res.status(404).json({ error: "You don't manage any club" });
+
+      const allowed = ["description", "stadium", "website", "social_twitter", "social_instagram", "social_facebook", "logo_url", "primary_color", "secondary_color"];
+      const updates = {};
+      for (const key of allowed) {
+        if (req.body[key] !== undefined) {
+          updates[key] = typeof req.body[key] === "string" ? req.body[key].trim() : req.body[key];
+        }
+      }
+      updates.updated_at = new Date();
+
+      Object.assign(club, updates);
+      await club.save();
+
+      return res.status(200).json({ message: "Club profile updated", club });
+    }
+
+    // POST /clubs/my-club/announcements — create announcement
+    if (pathname === "/api/clubs/my-club/announcements" && req.method === "POST") {
+      const decoded = verifyToken(req);
+      const club = await Club.findOne({ admin_user_ids: decoded.id, status: "active" });
+      if (!club) return res.status(404).json({ error: "You don't manage any club" });
+
+      const { title, content, pinned } = req.body || {};
+      if (!title || !content) return res.status(400).json({ error: "Title and content are required" });
+      if (title.length > 200) return res.status(400).json({ error: "Title too long (max 200 chars)" });
+
+      const announcement = await Announcement.create({
+        club_id: club._id,
+        author_id: decoded.id,
+        title: title.trim(),
+        content: content.trim(),
+        pinned: !!pinned,
+      });
+
+      // Notify followers
+      await notifyClubFollowers(club._id, "announcement", `${club.name}: ${title}`, content.slice(0, 100), `#clubs/${club.slug}`);
+
+      return res.status(201).json({ message: "Announcement posted", announcement });
+    }
+
+    // DELETE /clubs/my-club/announcements/:id — delete announcement
+    if (pathname.match(/\/clubs\/my-club\/announcements\/[^\/]+$/) && req.method === "DELETE") {
+      const decoded = verifyToken(req);
+      const club = await Club.findOne({ admin_user_ids: decoded.id, status: "active" });
+      if (!club) return res.status(404).json({ error: "You don't manage any club" });
+
+      const announcementId = pathname.split("/").pop();
+      const announcement = await Announcement.findOne({ _id: announcementId, club_id: club._id });
+      if (!announcement) return res.status(404).json({ error: "Announcement not found" });
+
+      await Announcement.deleteOne({ _id: announcementId });
+      return res.status(200).json({ message: "Announcement deleted" });
+    }
+
+    // GET /clubs/:slug/announcements — public announcements for a club
+    if (pathname.match(/\/clubs\/[a-z0-9-]+\/announcements$/) && req.method === "GET") {
+      const slug = pathname.split("/").slice(-2, -1)[0];
+      const club = await Club.findOne({ slug, status: "active" });
+      if (!club) return res.status(404).json({ error: "Club not found" });
+
+      const announcements = await Announcement.find({ club_id: club._id })
+        .sort({ pinned: -1, created_at: -1 })
+        .limit(20)
+        .populate("author_id", "display_name");
+
+      return res.status(200).json({
+        announcements: announcements.map(a => ({
+          _id: a._id,
+          title: a.title,
+          content: a.content,
+          pinned: a.pinned,
+          author: a.author_id?.display_name || "Unknown",
+          created_at: a.created_at,
+        })),
+      });
+    }
+
+    // ========================================================================
+    // NOTIFICATION ENDPOINTS
+    // ========================================================================
+
+    // GET /user/notifications — get notifications for current user
+    if (pathname === "/api/user/notifications" && req.method === "GET") {
+      const decoded = verifyToken(req);
+      const limit = Math.min(parseInt(req.query?.limit) || 30, 50);
+      const unreadOnly = req.query?.unread === "true";
+
+      const query = { user_id: decoded.id };
+      if (unreadOnly) query.read = false;
+
+      const notifications = await Notification.find(query)
+        .sort({ created_at: -1 })
+        .limit(limit);
+
+      const unreadCount = await Notification.countDocuments({ user_id: decoded.id, read: false });
+
+      return res.status(200).json({
+        notifications: notifications.map(n => ({
+          _id: n._id,
+          type: n.type,
+          title: n.title,
+          message: n.message,
+          link: n.link,
+          read: n.read,
+          created_at: n.created_at,
+        })),
+        unread_count: unreadCount,
+      });
+    }
+
+    // PATCH /user/notifications/read — mark notifications as read
+    if (pathname === "/api/user/notifications/read" && req.method === "PATCH") {
+      const decoded = verifyToken(req);
+      const { notification_ids, all } = req.body || {};
+
+      if (all) {
+        await Notification.updateMany({ user_id: decoded.id, read: false }, { read: true });
+      } else if (notification_ids && Array.isArray(notification_ids)) {
+        await Notification.updateMany(
+          { _id: { $in: notification_ids }, user_id: decoded.id },
+          { read: true }
+        );
+      } else {
+        return res.status(400).json({ error: "Provide notification_ids array or all:true" });
+      }
+
+      const unreadCount = await Notification.countDocuments({ user_id: decoded.id, read: false });
+      return res.status(200).json({ message: "Marked as read", unread_count: unreadCount });
+    }
+
+    // ========================================================================
+    // PUBLIC FAN PROFILE ENDPOINT
+    // ========================================================================
+
+    // GET /fans/:username — public fan profile
+    if (pathname.match(/\/fans\/[a-z0-9_-]+$/) && req.method === "GET") {
+      const username = pathname.split("/").pop();
+      const fan = await User.findOne({ username: username.toLowerCase() });
+      if (!fan) return res.status(404).json({ error: "Fan not found" });
+
+      // Get following clubs
+      const followingClubs = await Club.find({
+        _id: { $in: fan.following_clubs || [] },
+        status: "active",
+      }).select("name slug country league");
+
+      // Activity count and recent
+      const activityCount = await Activity.countDocuments({ user_id: fan._id });
+      const recentActivities = await Activity.find({ user_id: fan._id })
+        .sort({ created_at: -1 })
+        .limit(5)
+        .select("activity_type description points created_at");
+
+      // Referral count
+      const referralCount = await User.countDocuments({ referred_by: fan._id });
+
+      // Rank
+      const rank = await User.countDocuments({ total_score: { $gt: fan.total_score } }) + 1;
+
+      return res.status(200).json({
+        fan: {
+          display_name: fan.display_name,
+          username: fan.username,
+          bio: fan.bio || "",
+          favorite_club: fan.favorite_club || "",
+          level: fan.level,
+          total_score: fan.total_score,
+          badges: fan.badges || [],
+          created_at: fan.created_at,
+          rank,
+          stats: {
+            activity_count: activityCount,
+            following_count: followingClubs.length,
+            referral_count: referralCount,
+            badge_count: (fan.badges || []).length,
+          },
+          following_clubs: followingClubs,
+          recent_activities: recentActivities,
+        },
+      });
+    }
+
+    // ========================================================================
+    // CROSS-ENTITY SEARCH ENDPOINT
+    // ========================================================================
+
+    // GET /search?q=term — search across clubs, experts, articles, fans
+    if (pathname === "/api/search" && req.method === "GET") {
+      const q = (req.query?.q || "").trim();
+      if (!q || q.length < 2) return res.status(400).json({ error: "Search query must be at least 2 characters" });
+
+      const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      const limit = Math.min(parseInt(req.query?.limit) || 10, 20);
+
+      const [clubs, experts, articles, fans] = await Promise.all([
+        Club.find({ status: "active", $or: [{ name: regex }, { country: regex }, { league: regex }] })
+          .select("name slug country league fan_count")
+          .limit(limit),
+        Expert.find({ status: "active", $or: [{ name: regex }, { bio: regex }, { expertise_areas: regex }] })
+          .select("name slug expert_type tier")
+          .limit(limit),
+        Article.find({ status: "published", $or: [{ title: regex }, { summary: regex }, { tags: regex }] })
+          .select("title slug summary tags views")
+          .populate("expert_id", "name slug")
+          .limit(limit),
+        User.find({ $or: [{ display_name: regex }, { username: regex }] })
+          .select("display_name username level total_score")
+          .limit(limit),
+      ]);
+
+      return res.status(200).json({
+        query: q,
+        results: {
+          clubs: clubs.map(c => ({ type: "club", name: c.name, slug: c.slug, country: c.country, league: c.league, fan_count: c.fan_count })),
+          experts: experts.map(e => ({ type: "expert", name: e.name, slug: e.slug, expert_type: e.expert_type, tier: e.tier })),
+          articles: articles.map(a => ({ type: "article", title: a.title, slug: a.slug, summary: a.summary, tags: a.tags, views: a.views, expert: a.expert_id ? { name: a.expert_id.name, slug: a.expert_id.slug } : null })),
+          fans: fans.map(f => ({ type: "fan", display_name: f.display_name, username: f.username, level: f.level, total_score: f.total_score })),
+        },
+        total: clubs.length + experts.length + articles.length + fans.length,
       });
     }
 

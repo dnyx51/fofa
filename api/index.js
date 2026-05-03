@@ -434,29 +434,123 @@ function getLeagueNorms(leagueTier) {
   return LEAGUE_FUNDING_NORMS[leagueTier] || LEAGUE_FUNDING_NORMS["Other"];
 }
 
-/**
- * MOCK AI VERIFICATION
- * Returns a structured decision based on simple heuristics.
- * 
- * TO REPLACE WITH REAL AI:
- * 1. Add ANTHROPIC_API_KEY to env
- * 2. Replace this function body with a call to Anthropic API
- * 3. Construct a system prompt that asks Claude to:
- *    - Verify club existence (web search)
- *    - Check email domain matches website
- *    - Compare funding ask to league norms
- *    - Detect red flags
- *    - Return JSON in the same shape this returns
- * 4. Keep return shape identical so rest of system is unchanged
- */
 async function verifyClubApplicationWithAI(application) {
   const norms = getLeagueNorms(application.league_tier);
   const askAmount = application.funding_amount;
-  
+
   // Convert to GBP-equivalent for comparison (rough)
   const conversionRates = { GBP: 1, USD: 0.79, EUR: 0.85 };
   const askInGBP = askAmount * (conversionRates[application.funding_currency] || 1);
-  
+
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+  if (GEMINI_API_KEY) {
+    try {
+      const email = application.contact_email || "";
+      const emailDomain = email.split("@")[1] || "";
+      const websiteDomain = (application.website || "").replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
+      const askVsMax = askInGBP / norms.max_typical;
+      const askVsAvg = askInGBP / norms.avg;
+
+      const systemPrompt = `You are a football club application verifier for FOFA, a fan-ownership crowdfunding platform. Evaluate club applications and return a structured JSON decision.
+
+For each application, assess:
+1. club_exists: Does the club name sound like a real football club? Consider football-specific terms (FC, United, City, Athletic, Rovers, Wanderers, etc.), proper naming conventions, and reasonable length.
+2. email_legitimate: Does the contact email domain match the club's website domain? Personal email providers (gmail, yahoo, hotmail, outlook, qq, 163) are red flags for official club contacts.
+3. ask_reasonable: Is the funding amount reasonable given the league tier norms provided?
+4. red_flags: List any suspicious details using snake_case labels such as "personal_email_not_club_domain", "funding_ask_above_league_norm", "club_name_unusual_for_football", "funding_ask_Nx_typical_max", etc.
+
+Decision guidelines:
+- "approved": All major checks pass, no significant red flags, funding ask is within reasonable range
+- "rejected": Multiple failed checks, major red flags, or funding ask is >5x the typical maximum
+- "needs_review": Mixed signals — some flags present but not clearly fraudulent
+
+Respond with ONLY a valid JSON object — no markdown, no explanation, just the JSON:
+{
+  "decision": "approved" | "needs_review" | "rejected",
+  "confidence": <number 0.0–1.0>,
+  "reasoning": "<concise explanation of decision>",
+  "checks": {
+    "club_exists": <true | false | null>,
+    "email_legitimate": <true | false | null>,
+    "ask_reasonable": <true | false | null>,
+    "red_flags": ["<flag>", ...],
+    "league_average_funding": <number>,
+    "league_max_typical": <number>
+  },
+  "response_to_club": "<friendly message to send to the applying club>"
+}`;
+
+      const userMessage = `Evaluate this football club application:
+
+Club Name: ${application.club_name}
+League Tier: ${application.league_tier}
+Contact Email: ${application.contact_email || "not provided"}
+Email Domain: ${emailDomain || "unknown"}
+Website: ${application.website || "not provided"}
+Website Domain: ${websiteDomain || "unknown"}
+Funding Requested: ${application.funding_currency} ${askAmount.toLocaleString()} (≈ GBP ${Math.round(askInGBP).toLocaleString()})
+Additional Info: ${application.additional_info || "none"}
+
+League Funding Norms (GBP/season):
+- Average for ${application.league_tier}: GBP ${norms.avg.toLocaleString()}
+- Typical Maximum for ${application.league_tier}: GBP ${norms.max_typical.toLocaleString()}
+- Funding ask vs average: ${askVsAvg.toFixed(1)}x
+- Funding ask vs typical max: ${askVsMax.toFixed(1)}x
+
+Set league_average_funding to ${norms.avg} and league_max_typical to ${norms.max_typical} in your response.`;
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: systemPrompt }] },
+            contents: [{ role: "user", parts: [{ text: userMessage }] }],
+            generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Gemini API returned HTTP ${response.status}`);
+      }
+
+      const geminiData = await response.json();
+      const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+      let parsed;
+      try {
+        const jsonText = rawText.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+        parsed = JSON.parse(jsonText);
+      } catch (parseErr) {
+        throw new Error(`Failed to parse Gemini JSON response: ${parseErr.message}`);
+      }
+
+      const validDecisions = ["approved", "needs_review", "rejected"];
+      return {
+        decision: validDecisions.includes(parsed.decision) ? parsed.decision : "needs_review",
+        confidence: typeof parsed.confidence === "number" ? Math.max(0, Math.min(1, parsed.confidence)) : 0.7,
+        reasoning: parsed.reasoning || "AI verification completed.",
+        checks: {
+          club_exists: parsed.checks?.club_exists ?? null,
+          email_legitimate: parsed.checks?.email_legitimate ?? null,
+          ask_reasonable: parsed.checks?.ask_reasonable ?? null,
+          red_flags: Array.isArray(parsed.checks?.red_flags) ? parsed.checks.red_flags : [],
+          league_average_funding: norms.avg,
+          league_max_typical: norms.max_typical,
+        },
+        response_to_club: parsed.response_to_club || "Thank you for your application. We will be in touch shortly.",
+        verified_at: new Date(),
+        raw_response: rawText,
+      };
+    } catch (err) {
+      console.error("[AI Verification] Gemini API call failed, falling back to mock:", err.message);
+    }
+  }
+
+  // --- Fallback: heuristic mock logic (used when GEMINI_API_KEY is unset or Gemini call fails) ---
   const checks = {
     club_exists: null,
     email_legitimate: null,
@@ -465,23 +559,20 @@ async function verifyClubApplicationWithAI(application) {
     league_average_funding: norms.avg,
     league_max_typical: norms.max_typical,
   };
-  
-  // Mock check 1: Email looks legit (basic check)
+
   const email = application.contact_email || "";
   const emailDomain = email.split("@")[1] || "";
   const websiteDomain = (application.website || "").replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
-  
+
   if (emailDomain && (emailDomain === websiteDomain || emailDomain.includes(websiteDomain.split(".")[0]))) {
     checks.email_legitimate = true;
   } else if (emailDomain.match(/^(gmail|yahoo|hotmail|outlook|qq|163)\.(com|net)$/)) {
     checks.email_legitimate = false;
     checks.red_flags.push("personal_email_not_club_domain");
   } else {
-    checks.email_legitimate = null; // Unknown
+    checks.email_legitimate = null;
   }
-  
-  // Mock check 2: Club exists (placeholder - real AI would web search)
-  // For mock: just check if name looks plausible (>3 chars, has at least one common football word)
+
   const clubNameLower = application.club_name.toLowerCase();
   const hasFootballWord = /\b(fc|football|club|united|city|town|athletic|rovers|wanderers|albion|villa|hotspur|st\.|saints|park)\b/.test(clubNameLower);
   if (application.club_name.length < 3) {
@@ -491,13 +582,11 @@ async function verifyClubApplicationWithAI(application) {
     checks.club_exists = null;
     checks.red_flags.push("club_name_unusual_for_football");
   } else {
-    checks.club_exists = true; // Optimistic without real verification
+    checks.club_exists = true;
   }
-  
-  // Mock check 3: Funding ask reasonable
-  const askVsAverage = askInGBP / norms.avg;
+
   const askVsMax = askInGBP / norms.max_typical;
-  
+
   if (askVsMax > 5) {
     checks.ask_reasonable = false;
     checks.red_flags.push(`funding_ask_${Math.round(askVsMax)}x_typical_max`);
@@ -507,13 +596,12 @@ async function verifyClubApplicationWithAI(application) {
   } else {
     checks.ask_reasonable = true;
   }
-  
-  // Decision logic
+
   let decision, confidence, reasoning, response_to_club;
-  
+
   const passedChecks = [checks.email_legitimate, checks.club_exists, checks.ask_reasonable].filter(c => c === true).length;
   const failedChecks = [checks.email_legitimate, checks.club_exists, checks.ask_reasonable].filter(c => c === false).length;
-  
+
   if (failedChecks === 0 && passedChecks >= 2 && checks.red_flags.length === 0) {
     decision = "approved";
     confidence = 0.85;
@@ -530,7 +618,7 @@ async function verifyClubApplicationWithAI(application) {
     reasoning = `Application has some flags requiring human review. Red flags: ${checks.red_flags.join(", ") || "none"}. Recommend manual review.`;
     response_to_club = `Thank you for your application. We're reviewing your submission and will be in touch within 5-7 business days.`;
   }
-  
+
   return {
     decision,
     confidence,
@@ -538,7 +626,7 @@ async function verifyClubApplicationWithAI(application) {
     checks,
     response_to_club,
     verified_at: new Date(),
-    raw_response: "MOCK_AI_RESPONSE - Replace with real Anthropic API call",
+    raw_response: "MOCK_AI_RESPONSE - No GEMINI_API_KEY set",
   };
 }
 

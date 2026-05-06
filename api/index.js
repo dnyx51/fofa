@@ -1,5 +1,5 @@
 // ============================================================================
-// FOFA API - DEBUG VERSION (shows MongoDB connection errors)
+// FOFA API - WITH AI NOTIFICATIONS
 // ============================================================================
 
 import jwt from "jsonwebtoken";
@@ -1506,7 +1506,7 @@ export default async function handler(req, res) {
         status: "ai_reviewing",
       });
       
-      // Run AI verification (mock for now)
+      // Run AI verification
       try {
         const aiResult = await verifyClubApplicationWithAI(application);
         application.ai_verification = aiResult;
@@ -1521,6 +1521,17 @@ export default async function handler(req, res) {
         }
         
         await application.save();
+        
+        // ✨ SEND NOTIFICATION EMAIL TO ADMIN
+        try {
+          const { notifyClubApplicationSubmitted } = await import("../utils/notification-service.js");
+          await notifyClubApplicationSubmitted(application);
+          console.log("✅ Club application notification sent");
+        } catch (notificationErr) {
+          console.error("⚠️  Notification failed (non-blocking):", notificationErr.message);
+          // Don't fail the request if notification fails
+        }
+        
       } catch (err) {
         console.error("AI verification error:", err);
         application.status = "needs_human_review";
@@ -1856,6 +1867,17 @@ export default async function handler(req, res) {
         application.ai_verification = aiResult;
         application.status = aiResult.decision === "rejected" ? "rejected" : "needs_human_review";
         await application.save();
+        
+        // ✨ SEND NOTIFICATION EMAIL TO ADMIN
+        try {
+          const { notifyExpertApplicationSubmitted } = await import("../utils/notification-service.js");
+          await notifyExpertApplicationSubmitted(application);
+          console.log("✅ Expert application notification sent");
+        } catch (notificationErr) {
+          console.error("⚠️  Notification failed (non-blocking):", notificationErr.message);
+          // Don't fail the request if notification fails
+        }
+        
       } catch (err) {
         console.error("Expert AI verification error:", err);
         application.status = "needs_human_review";

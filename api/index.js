@@ -1553,27 +1553,37 @@ export default async function handler(req, res) {
       });
       
       // Run AI verification (mock for now)
-      try {
-        const aiResult = await verifyClubApplicationWithAI(application);
-        application.ai_verification = aiResult;
-        
-        // Auto-update status based on AI decision
-        if (aiResult.decision === "approved") {
-          application.status = "needs_human_review"; // Always need human approval to publish
-        } else if (aiResult.decision === "rejected") {
-          application.status = "rejected";
-        } else {
-          application.status = "needs_human_review";
-        }
-        
-        await application.save();
-      } catch (err) {
-        console.error("AI verification error:", err);
-        application.status = "needs_human_review";
-        await application.save();
-      }
-      
-      return res.status(201).json({
+      // Run AI verification
+try {
+  const aiResult = await verifyClubApplicationWithAI(application);
+  application.ai_verification = aiResult;
+  
+  // Auto-update status based on AI decision
+  if (aiResult.decision === "approved") {
+    application.status = "needs_human_review";
+  } else if (aiResult.decision === "rejected") {
+    application.status = "rejected";
+  } else {
+    application.status = "needs_human_review";
+  }
+  
+  await application.save();
+} catch (err) {
+  console.error("AI verification error:", err);
+  application.status = "needs_human_review";
+  await application.save();
+}
+
+// ✨ SEND NOTIFICATION EMAIL TO ADMIN (all decisions)
+try {
+  const { notifyClubApplicationSubmitted } = await import("../utils/notification-service.js");
+  await notifyClubApplicationSubmitted(application);
+  console.log("✅ Club application notification sent");
+} catch (notificationErr) {
+  console.error("⚠️  Notification failed (non-blocking):", notificationErr.message);
+}
+
+return res.status(201).json({
         message: "Application submitted successfully",
         application_id: application._id.toString(),
         status: application.status,

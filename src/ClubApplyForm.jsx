@@ -387,7 +387,7 @@ export default function ClubApplyForm() {
                     }}>
                       ⚡ AI VERIFICATION
                     </div>
-                    Your application will be automatically reviewed by our AI agent which checks club authenticity, verifies your funding ask against league norms, and detects red flags. Decisions are typically returned within minutes.
+                    Your application is reviewed by FOFA's global network — a combination of artificial intelligence and verified football experts who validate club authenticity and assess your partnership fit.
                   </div>
                 </FormStep>
               )}

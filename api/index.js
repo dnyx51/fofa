@@ -450,6 +450,45 @@ function getLeagueNorms(leagueTier) {
  * 4. Keep return shape identical so rest of system is unchanged
  */
 async function verifyClubApplicationWithAI(application) {
+  try {
+    // Import the enhanced research service
+    const { verifyClubApplicationEnhanced } = await import("../utils/club-research-service.js");
+    
+    const result = await verifyClubApplicationEnhanced(application);
+    
+    // Map result to expected format
+    return {
+      decision: result.decision,
+      confidence: result.confidence,
+      reasoning: result.reasoning,
+      checks: {
+        club_exists: result.checks?.clubExists,
+        website: result.checks?.website,
+        social_media: result.checks?.socialMedia,
+        founded_year: result.checks?.founded,
+        fan_base: result.checks?.fanBase,
+        league: result.checks?.league,
+        stadium: result.checks?.stadium,
+        red_flags: result.checks?.redFlags || [],
+        league_average_funding: result.checks?.fundingNormAvg,
+        league_max_typical: result.checks?.fundingNormMax,
+      },
+      response_to_club: buildResponseToClub(result.decision),
+      verified_at: new Date(),
+      raw_response: result.research ? JSON.stringify(result.research) : "Research phase could not complete",
+    };
+  } catch (error) {
+    console.error("Enhanced verification error:", error.message);
+    
+    // Fallback to basic verification if research service fails
+    return verifyClubApplicationWithAIFallback(application);
+  }
+}
+
+/**
+ * Fallback verification when research service is unavailable
+ */
+function verifyClubApplicationWithAIFallback(application) {
   const norms = getLeagueNorms(application.league_tier);
   const askAmount = application.funding_amount;
   
@@ -466,7 +505,7 @@ async function verifyClubApplicationWithAI(application) {
     league_max_typical: norms.max_typical,
   };
   
-  // Mock check 1: Email looks legit (basic check)
+  // Basic check 1: Email looks legit
   const email = application.contact_email || "";
   const emailDomain = email.split("@")[1] || "";
   const websiteDomain = (application.website || "").replace(/^https?:\/\/(www\.)?/, "").split("/")[0];
@@ -477,11 +516,10 @@ async function verifyClubApplicationWithAI(application) {
     checks.email_legitimate = false;
     checks.red_flags.push("personal_email_not_club_domain");
   } else {
-    checks.email_legitimate = null; // Unknown
+    checks.email_legitimate = null;
   }
   
-  // Mock check 2: Club exists (placeholder - real AI would web search)
-  // For mock: just check if name looks plausible (>3 chars, has at least one common football word)
+  // Basic check 2: Club name looks plausible
   const clubNameLower = application.club_name.toLowerCase();
   const hasFootballWord = /\b(fc|football|club|united|city|town|athletic|rovers|wanderers|albion|villa|hotspur|st\.|saints|park)\b/.test(clubNameLower);
   if (application.club_name.length < 3) {
@@ -491,11 +529,10 @@ async function verifyClubApplicationWithAI(application) {
     checks.club_exists = null;
     checks.red_flags.push("club_name_unusual_for_football");
   } else {
-    checks.club_exists = true; // Optimistic without real verification
+    checks.club_exists = true;
   }
   
-  // Mock check 3: Funding ask reasonable
-  const askVsAverage = askInGBP / norms.avg;
+  // Basic check 3: Funding ask reasonable
   const askVsMax = askInGBP / norms.max_typical;
   
   if (askVsMax > 5) {
@@ -509,7 +546,7 @@ async function verifyClubApplicationWithAI(application) {
   }
   
   // Decision logic
-  let decision, confidence, reasoning, response_to_club;
+  let decision, confidence, reasoning;
   
   const passedChecks = [checks.email_legitimate, checks.club_exists, checks.ask_reasonable].filter(c => c === true).length;
   const failedChecks = [checks.email_legitimate, checks.club_exists, checks.ask_reasonable].filter(c => c === false).length;
@@ -517,18 +554,15 @@ async function verifyClubApplicationWithAI(application) {
   if (failedChecks === 0 && passedChecks >= 2 && checks.red_flags.length === 0) {
     decision = "approved";
     confidence = 0.85;
-    reasoning = `Club verified successfully. Funding ask of ${application.funding_currency} ${askAmount.toLocaleString()} is within reasonable range for ${application.league_tier} (typical max: GBP ${norms.max_typical.toLocaleString()}). Recommend approval.`;
-    response_to_club = `Welcome to FOFA! Your club application has been approved. You'll receive setup instructions shortly.`;
+    reasoning = `Club verified. Funding ask is within range for ${application.league_tier}.`;
   } else if (failedChecks >= 2 || checks.red_flags.length >= 2) {
     decision = "rejected";
     confidence = 0.75;
-    reasoning = `Application rejected due to: ${checks.red_flags.join(", ")}. Funding ask (${application.funding_currency} ${askAmount.toLocaleString()}) is ${askVsMax.toFixed(1)}x the typical maximum for ${application.league_tier}.`;
-    response_to_club = `Thank you for your interest in FOFA. Unfortunately we cannot approve this application at this time. Common reasons include: funding ask significantly above league norms, contact email not matching club domain, or unverifiable club details. You're welcome to revise and re-apply.`;
+    reasoning = `Rejected due to: ${checks.red_flags.join(", ")}`;
   } else {
     decision = "needs_review";
     confidence = 0.55;
-    reasoning = `Application has some flags requiring human review. Red flags: ${checks.red_flags.join(", ") || "none"}. Recommend manual review.`;
-    response_to_club = `Thank you for your application. We're reviewing your submission and will be in touch within 5-7 business days.`;
+    reasoning = `Needs review. Flags: ${checks.red_flags.join(", ") || "none"}`;
   }
   
   return {
@@ -536,12 +570,24 @@ async function verifyClubApplicationWithAI(application) {
     confidence,
     reasoning,
     checks,
-    response_to_club,
+    response_to_club: buildResponseToClub(decision),
     verified_at: new Date(),
-    raw_response: "MOCK_AI_RESPONSE - Replace with real Anthropic API call",
+    raw_response: "FALLBACK_VERIFICATION - Research service unavailable",
   };
 }
 
+/**
+ * Build response message to club based on decision
+ */
+function buildResponseToClub(decision) {
+  const responses = {
+    approved: `Welcome to FOFA! Your club application has been approved. You'll receive setup instructions shortly.`,
+    rejected: `Thank you for your interest in FOFA. We are unable to approve this application at this time. You're welcome to revise and re-apply.`,
+    needs_review: `Thank you for your application. We're reviewing your submission and will be in touch within 5-7 business days.`,
+  };
+  
+  return responses[decision] || responses.needs_review;
+}
 function slugifyClubName(name) {
   return name
     .toLowerCase()
